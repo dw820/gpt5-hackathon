@@ -14,10 +14,14 @@ export type ResponseInput = OpenAI.Responses.ResponseCreateParams["input"];
 export async function getResponseOutputText(
   input: string | ResponseInput
 ): Promise<string> {
+  const startedAt = Date.now();
+  console.log("[lib/make-web] openai call start");
   const response = await openai.responses.create({
-    model: "gpt-5",
+    model: "gpt-5-nano",
     input,
   });
+  const durationMs = Date.now() - startedAt;
+  console.log("[lib/make-web] openai call end", { durationMs });
 
   // Prefer the convenience field if present; otherwise assemble text manually
   const outputText = (
