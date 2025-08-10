@@ -8,12 +8,14 @@ export default function StudioPage() {
   const [slug, setSlug] = useState("");
   const [isPending, startTransition] = useTransition();
   const [imageDataUrl, setImageDataUrl] = useState<string>("");
+  const [imageLocalPath, setImageLocalPath] = useState<string>("");
   const [status, setStatus] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
-  async function onFileChange(file?: File | null) {
+  async function onFileChange(file?: File | null, localPathHint?: string) {
     if (!file) {
       setImageDataUrl("");
+      setImageLocalPath("");
       return;
     }
     const reader = new FileReader();
@@ -23,9 +25,15 @@ export default function StudioPage() {
     reader.readAsDataURL(file);
     const dataUrl = await done;
     setImageDataUrl(dataUrl);
+    setImageLocalPath(
+      localPathHint && localPathHint.trim().length > 0
+        ? localPathHint
+        : file.name
+    );
     console.log("[studio] image selected", {
       sizeBytes: dataUrl.length,
       mime: dataUrl.slice(5, dataUrl.indexOf(";")),
+      localPathPreview: (localPathHint || file.name || "").slice(0, 128),
     });
   }
 
@@ -42,6 +50,7 @@ export default function StudioPage() {
     console.log("[studio] generate start", {
       promptLength: prompt.length,
       hasImage: Boolean(imageDataUrl),
+      hasLocalPath: Boolean(imageLocalPath),
       slugLength: finalSlug.length,
     });
     startTransition(async () => {
@@ -52,6 +61,7 @@ export default function StudioPage() {
           body: JSON.stringify({
             prompt,
             imageDataUrl: imageDataUrl || undefined,
+            imageLocalPath: imageLocalPath || undefined,
             slug: finalSlug,
           }),
         });
@@ -110,7 +120,9 @@ export default function StudioPage() {
             <input
               type="file"
               accept="image/*"
-              onChange={(e) => onFileChange(e.target.files?.[0])}
+              onChange={(e) =>
+                onFileChange(e.target.files?.[0], e.target.value)
+              }
               className="hidden"
             />
             {imageDataUrl ? "Image selected" : "Attach image"}

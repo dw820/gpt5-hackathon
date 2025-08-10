@@ -18,54 +18,53 @@ function sanitizeSlug(slug: string): string {
 }
 
 const SYSTEM_PROMPT = `
-You are a world-class web game designer and frontend developer. Generate a single, complete, valid, self-contained HTML document for a simple, fun, interactive game that uses the user's provided image as the main visual element.
+You are a world-class web game designer and frontend developer. Generate a single, complete, valid HTML document for a simple, fun, interactive game that uses the image from the provided URL as the main visual element.
 
 RULES:
 1. OUTPUT
    - Return only the HTML document inside a single \`\`\`html code block.
-   - Must be fully self-contained: no external assets, fonts, scripts, or network calls.
+   - The HTML can load the provided image directly from its URL (no need to embed it as base64).
+   - If an image URL is provided, use the literal placeholder {{IMAGE_URL}} wherever the image URL is needed (e.g., <img src="{{IMAGE_URL}}"> or CSS background). The server will replace this placeholder with the actual URL.
 
 2. IMAGE USAGE
-   - Use the provided image directly in the game (e.g., as a background, target, or draggable object).
-   - If the image has distinct elements or colors, incorporate them into the gameplay (e.g., collect items of a certain color from the image).
-   - If no image is provided, create a simple inline SVG placeholder.
+   - Use the provided image directly in the game (e.g., as the main object, clickable target, draggable object).
+   - If the image has distinct elements or colors, incorporate them into the gameplay idea.
+   - If no image URL is provided, show a simple placeholder.
 
 3. GAME DESIGN
-   - Keep the game **very simple** — no complex mechanics.
-   - Must be playable instantly without extra user input beyond interacting with the game.
-   - Show basic instructions, score, and a restart button.
-   - Support mouse, touch, and keyboard if relevant.
-   - Game should run smoothly in any modern browser.
+   - Keep the game **very simple** — no complex mechanics or heavy logic.
+   - Playable instantly without extra setup.
+   - Include basic instructions, score, and a restart button.
+   - Support mouse and touch (keyboard optional).
+   - Works in any modern browser.
 
 4. CODE STYLE
-   - Use semantic HTML and responsive inline CSS.
-   - Use minimal, clean JavaScript inside a single \`<script>\` tag.
-   - Add short code comments only for image→game mapping.
-   - Avoid heavy logic, large code, or complex physics.
-
-5. SAFETY & ACCESSIBILITY
-   - No personal claims about real people in images.
-   - Include \`alt\` text and basic ARIA labels.
-   - No external dependencies, tracking, or analytics.
+   - Use semantic HTML, responsive inline CSS, and minimal clean JavaScript.
+   - Short comments only for explaining how the image is used.
+   - No external JS/CSS libraries, tracking, or analytics.
 
 GOAL:
-Produce a small, working, fun game that directly incorporates the user’s image and can be played in 30–60 seconds.
+Produce a small, working, fun game that directly incorporates the image from the provided URL.
 
 END.
 `;
 
 export async function POST(request: Request) {
   try {
-    const { prompt, imageDataUrl, slug } = (await request.json()) as {
-      prompt: string;
-      imageDataUrl?: string;
-      slug?: string;
-    };
+    const { prompt, imageDataUrl, imageLocalPath, slug } =
+      (await request.json()) as {
+        prompt: string;
+        imageDataUrl?: string;
+        imageLocalPath?: string;
+        slug?: string;
+      };
     console.log("[api/generate] request", {
       hasPrompt: Boolean(prompt),
       promptLength: typeof prompt === "string" ? prompt.length : undefined,
       hasImage: Boolean(imageDataUrl),
       imagePreview: imageDataUrl?.slice(0, 32),
+      hasLocalPath: Boolean(imageLocalPath),
+      localPathPreview: imageLocalPath?.slice(0, 64),
       hasSlug: Boolean(slug),
       slugLength: typeof slug === "string" ? slug.length : undefined,
     });
@@ -76,6 +75,29 @@ export async function POST(request: Request) {
       );
     }
 
+    const userContent = [
+      { type: "input_text", text: prompt },
+      ...(imageDataUrl
+        ? [
+            {
+              type: "input_text",
+              text: "Use the literal placeholder {{IMAGE_URL}} wherever the image URL is needed in the HTML.",
+            },
+          ]
+        : []),
+      ...(imageLocalPath && imageLocalPath.trim().length > 0
+        ? [
+            {
+              type: "input_text",
+              text: `Important: Include this exact local image path string somewhere in the output HTML (e.g., inside a comment or instructions): ${imageLocalPath}`,
+            },
+          ]
+        : []),
+      ...(imageDataUrl
+        ? [{ type: "input_image", image_url: imageDataUrl, detail: "auto" }]
+        : []),
+    ];
+
     const input = [
       {
         role: "system",
@@ -83,22 +105,20 @@ export async function POST(request: Request) {
       },
       {
         role: "user",
-        content: [
-          { type: "input_text", text: prompt },
-          ...(imageDataUrl
-            ? [{ type: "input_image", image_url: imageDataUrl, detail: "auto" }]
-            : []),
-        ],
+        content: userContent,
       },
     ] as unknown as ResponseInput;
 
     const startedAt = Date.now();
     const responseText = await getResponseOutputText(input);
     const html = extractHtmlFromText(responseText);
+    const finalHtml = imageDataUrl
+      ? html.replaceAll("{{IMAGE_URL}}", imageDataUrl)
+      : html;
     const durationMs = Date.now() - startedAt;
     console.log("[api/generate] success", {
       durationMs,
-      htmlLength: html.length,
+      htmlLength: finalHtml.length,
     });
 
     // If a slug was provided, save immediately and return the generated page URL
@@ -106,7 +126,7 @@ export async function POST(request: Request) {
       const safe = sanitizeSlug(slug);
       const filename = safe.endsWith(".html") ? safe : `${safe}.html`;
       const saveStartedAt = Date.now();
-      await saveHtml(html, filename);
+      await saveHtml(finalHtml, filename);
       const saveDurationMs = Date.now() - saveStartedAt;
       console.log("[api/generate] saved", {
         saveDurationMs,
@@ -117,7 +137,7 @@ export async function POST(request: Request) {
     }
 
     // Fallback: return HTML for clients that still preview in-memory
-    return NextResponse.json({ html });
+    return NextResponse.json({ html: finalHtml });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";
     console.error("[api/generate] error", { message });

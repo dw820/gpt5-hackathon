@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Fluffy Fetch — drag the pup!</title>
+<style>
+  :root{
+    --blue1:#2c74d6;
+    --blue2:#6fb2ff;
+    --ink:#0c1b2a;
+    --panel:#ffffffdd;
+  }
+  html,body{height:100%;margin:0}
+  body{
+    display:flex;align-items:center;justify-content:center;
+    background: radial-gradient(120vmax 120vmax at 20% -20%, var(--blue2), var(--blue1) 60%, #0b3d91);
+    color:var(--ink); font:16px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    user-select:none; -webkit-user-select:none;
+  }
+
+  /* Game board */
+  .wrap{width:min(920px,96vw); }
+  header{
+    display:flex;gap:.75rem;align-items:center;justify-content:space-between;
+    background:var(--panel); border-radius:14px 14px 0 0; padding:.6rem .8rem;
+    box-shadow:0 8px 22px #0003;
+  }
+  header b{font-weight:700}
+  .btn{
+    appearance:none;border:0;border-radius:10px;padding:.5rem .8rem;
+    background:#ffcc4d;color:#332b00;font-weight:700;cursor:pointer;
+    box-shadow:0 2px 0 #c99b1f; transition:transform .05s;
+  }
+  .btn:active{transform:translateY(1px)}
+  #game{
+    position:relative; overflow:hidden; aspect-ratio:16/9;
+    background:
+      radial-gradient(120% 100% at 50% 110%, #0b396f00 20%, #0b396f40 70%, #0b396f8c 100%),
+      linear-gradient(#8bd7ff66,#8bd7ff00 40%),
+      #1b62c9;
+    border-radius:0 0 14px 14px;
+    box-shadow:0 18px 40px #0003 inset;
+    touch-action:none;  /* unified mouse/touch control */
+  }
+  #dog{
+    position:absolute; width:22vmin; max-width:220px; min-width:120px;
+    aspect-ratio: 3 / 2; object-fit:cover; object-position:center;
+    border-radius:16px; box-shadow:0 10px 20px #0005, 0 0 0 3px #ffffffaa;
+    transition:transform .1s; cursor:grab; -webkit-user-drag:none;
+  }
+  #dog.drag{cursor:grabbing; transform:scale(1.02)}
+  /* Treats (bones) */
+  .treat{
+    position:absolute; font-size:clamp(28px, 3.4vmin, 42px);
+    filter: drop-shadow(0 6px 6px #0004); transition:transform .1s;
+  }
+  .treat.bonus{font-size:clamp(34px, 4vmin, 54px)}
+  .pop{position:absolute; pointer-events:none; font-size:18px; opacity:.9; animation:rise .65s ease-out forwards}
+  @keyframes rise{to{transform:translateY(-22px);opacity:0}}
+  /* Overlay text */
+  .overlay{
+    position:absolute; inset:0; display:grid; place-items:center;
+    background:linear-gradient(#00000022,#00000066);
+    color:white; backdrop-filter:blur(2px);
+    font-weight:700; text-align:center; padding:1rem; 
+  }
+  .overlay .card{
+    background:#00000055; border:1px solid #ffffff55;
+    border-radius:14px; padding:1rem 1.1rem; max-width:520px;
+  }
+  .overlay h1{margin:.2rem 0 .6rem; font-size:clamp(20px, 4.2vmin, 30px)}
+  .overlay p{margin:.4rem 0; opacity:.95}
+  .mini{
+    font-size:.9rem; opacity:.85; background:#fff3; padding:.15rem .4rem; border-radius:8px;
+  }
+  footer{
+    text-align:center; color:#fff; opacity:.85; font-size:.85rem; margin-top:.4rem
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <b>Fluffy Fetch</b>
+        <span class="mini">Drag the dog to collect 🦴</span>
+      </div>
+      <div aria-live="polite">
+        Score: <b id="score">0</b> • Time: <b id="time">30</b>s
+      </div>
+      <button id="restart" class="btn" type="button" title="Restart">Restart</button>
+    </header>
+
+    <main id="game" aria-label="Game board">
+      <!-- The dog image is the main interactive piece -->
+      <img id="dog" alt="Draggable dog" draggable="false">
+      <div id="overlay" class="overlay">
+        <div class="card">
+          <h1>Boop ‘n Fetch!</h1>
+          <p>Drag or swipe the fluffy pup to catch the treats. 🦴 = 1 point, ✨ star = 3 points.</p>
+          <p>30 seconds. How high can you score?</p>
+          <p class="mini">Mouse or touch supported.</p>
+          <p style="margin-top:.7rem"><button id="start" class="btn" type="button">Start</button></p>
+        </div>
+      </div>
+    </main>
+    <footer>Tip: Faster movement leaves little sparkle poofs!</footer>
+  </div>
+
+<script>
+/* You can swap this URL with any image. If an image URL is present in the page's query string (?img=...), it will be used. */
+const providedURL = new URLSearchParams(location.search).get('img');
+/* If the chat provided a URL, paste it below to hard-bind the image: */
+const HARDCODED_IMAGE = ""; // e.g., "https://example.com/your-image.jpg"
+const FALLBACK = "https://via.placeholder.com/800x520.png?text=Drag+the+Pup!";
+
+const IMG_URL = (HARDCODED_IMAGE || providedURL || FALLBACK);
+
+const game = document.getElementById('game');
+const dog  = document.getElementById('dog');
+dog.src = IMG_URL;
+
+const scoreEl = document.getElementById('score');
+const timeEl  = document.getElementById('time');
+const restartBtn = document.getElementById('restart');
+const overlay = document.getElementById('overlay');
+const startBtn = document.getElementById('start');
+
+let playing = false, score = 0, timeLeft = 30, timerId = null;
+let dragging = false, offsetX = 0, offsetY = 0;
+let treat = null;
+
+function clamp(v,min,max){return Math.max(min,Math.min(max,v));}
+function rand(min,max){return Math.floor(Math.random()*(max-min+1))+min;}
+
+function centerDog(){
+  const r = game.getBoundingClientRect();
+  const dw = dog.getBoundingClientRect().width || 180;
+  const dh = dog.getBoundingClientRect().height || 120;
+  dog.style.left = (r.width/2 - dw/2) + "px";
+  dog.style.top  = (r.height/2 - dh/2) + "px";
+}
+
+function spawnTreat(){
+  if (treat) treat.remove();
+  treat = document.createElement('div');
+  const isBonus = Math.random()<0.18;
+  treat.className = 'treat' + (isBonus?' bonus':'');
+  treat.textContent = isBonus ? '✨' : '🦴'; // simple emoji graphics
+  game.appendChild(treat);
+  const gr = game.getBoundingClientRect();
+  const tr = treat.getBoundingClientRect();
+  const pad = 10;
+  const x = rand(pad, Math.max(pad, gr.width - tr.width - pad));
+  const y = rand(pad, Math.max(pad, gr.height - tr.height - pad));
+  treat.style.left = x + "px";
+  treat.style.top  = y + "px";
+  treat.dataset.points = isBonus ? 3 : 1;
+}
+
+/* Collision: basic rect intersect */
+function intersect(a,b){
+  return !(a.right<b.left || a.left>b.right || a.bottom<b.top || a.top>b.bottom);
+}
+
+function popText(text, x,y, color="#fff"){
+  const p = document.createElement('div');
+  p.className="pop"; p.textContent=text;
+  p.style.left = x+"px"; p.style.top = y+"px"; p.style.color=color;
+  game.appendChild(p);
+  setTimeout(()=>p.remove(), 700);
+}
+
+/* Sparkle trail */
+let lastTrail = 0;
+function sparkleTrail(px,py){
+  const now = performance.now();
+  if (now - lastTrail < 50) return;
+  lastTrail = now;
+  const s = document.createElement('div');
+  s.textContent='✨'; s.style.position='absolute';
+  s.style.left = (px-8) + 'px'; s.style.top = (py-8) + 'px'; s.style.opacity=.8;
+  s.style.pointerEvents='none'; s.style.filter='drop-shadow(0 4px 4px #0005)';
+  game.appendChild(s);
+  setTimeout(()=>s.remove(), 400);
+}
+
+function startGame(){
+  if (playing) return;
+  playing = true; score = 0; timeLeft = 30;
+  scoreEl.textContent = score; timeEl.textContent = timeLeft;
+  overlay.style.display = 'none';
+  centerDog(); spawnTreat();
+
+  clearInterval(timerId);
+  timerId = setInterval(()=>{
+    timeLeft--;
+    timeEl.textContent = timeLeft;
+    if (timeLeft<=0) endGame();
+  },1000);
+}
+
+function endGame(){
+  playing = false; dragging = false;
+  clearInterval(timerId); timerId = null;
+  dog.classList.remove('drag');
+  const msg = overlay.querySelector('.card');
+  msg.innerHTML = `
+    <h1>Time’s up!</h1>
+    <p>You scored <b>${score}</b> ${score===1?'point':'points'}.</p>
+    <p class="mini">Tap Restart to try again.</p>
+    <p style="margin-top:.7rem"><button id="start2" class="btn" type="button">Restart</button></p>`;
+  overlay.style.display='grid';
+  msg.querySelector('#start2').onclick = startGame;
+}
+
+/* Drag (pointer) controls */
+game.addEventListener('pointerdown', (e)=>{
+  if (!playing) return;
+  if (e.target !== dog) return;
+  dragging = true; dog.setPointerCapture(e.pointerId);
+  dog.classList.add('drag');
+  const dr = dog.getBoundingClientRect();
+  const gr = game.getBoundingClientRect();
+  offsetX = e.clientX - dr.left;
+  offsetY = e.clientY - dr.top;
+  e.preventDefault();
+});
+
+game.addEventListener('pointermove',(e)=>{
+  if (!dragging) return;
+  const gr = game.getBoundingClientRect();
+  const dw = dog.getBoundingClientRect().width;
+  const dh = dog.getBoundingClientRect().height;
+  let x = e.clientX - gr.left - offsetX;
+  let y = e.clientY - gr.top  - offsetY;
+  x = clamp(x, 0, gr.width - dw); y = clamp(y, 0, gr.height - dh);
+  dog.style.left = x + "px"; dog.style.top = y + "px";
+  sparkleTrail(e.clientX - gr.left, e.clientY - gr.top);
+  checkCatch();
+});
+
+['pointerup','pointercancel','pointerleave'].forEach(type=>{
+  game.addEventListener(type, ()=>{
+    dragging=false; dog.classList.remove('drag');
+  });
+});
+
+function checkCatch(){
+  if (!treat) return;
+  const dr = dog.getBoundingClientRect();
+  const tr = treat.getBoundingClientRect();
+  if (intersect(dr,tr)){
+    const pts = Number(treat.dataset.points||1);
+    score += pts; scoreEl.textContent = score;
+    popText(`+${pts}`, tr.left + tr.width/2, tr.top + tr.height/2, pts>1 ? "#ffe066" : "#fff");
+    treat.remove(); treat=null;
+    spawnTreat();
+  }
+}
+
+/* Resize handling */
+window.addEventListener('resize', ()=>{ centerDog(); });
+
+/* UI buttons */
+restartBtn.addEventListener('click', ()=>{ startGame(); });
+startBtn.addEventListener('click', startGame);
+
+/* Initial placement */
+centerDog();
+</script>
+</body>
+</html>
