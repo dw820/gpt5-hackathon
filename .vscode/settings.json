@@ -1,0 +1,30 @@
+{
+  // TypeScript support for Next.js side
+  "typescript.preferences.includePackageJsonAutoImports": "on",
+  "typescript.suggest.autoImports": true,
+  "typescript.inlayHints.parameterNames.enabled": "all",
+
+  // File associations
+  "files.associations": {
+    "*.edge": "typescript"
+  },
+
+  // Performance optimization
+  "files.exclude": {
+    "**/.next": true,
+    "**/node_modules": true,
+    "**/supabase/.temp": true,
+    "**/.turbo": true
+  },
+
+  // Search optimization
+  "search.exclude": {
+    "**/.next": true,
+    "**/node_modules": true,
+    "**/.turbo": true,
+    "**/dist": true
+  },
+  "workbench.editorAssociations": {
+    "*.md": "vscode.markdown.preview.editor"
+  }
+}
