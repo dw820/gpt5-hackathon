@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Happy Game</title>
+  <style>
+    :root {
+      --bg: linear-gradient(135deg, #1e3a8a 0%, #2563eb 40%, #1e3a8a 100%);
+      --dot1: #ff6b6b;
+      --dot2: #6bc6ff;
+      --dot3: #ffd166;
+      --dot4: #8bd77f;
+      --text: #ffffff;
+    }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial;
+      color: #fff;
+      background: #0b1b33;
+    }
+
+    /* Full-bleed game container */
+    .game {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      background: var(--bg);
+      overflow: hidden;
+    }
+
+    /* HUD at top: score, timer, restart */
+    .hud {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      background: rgba(0,0,0,0.15);
+      backdrop-filter: blur(2px);
+      position: sticky; /* visually at top, even on resize */
+      top: 0;
+      z-index: 3;
+      border-bottom: 1px solid rgba(255,255,255,0.15);
+    }
+
+    .hud .left, .hud .right {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(0,0,0,0.25);
+      border: 1px solid rgba(255,255,255,0.25);
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .btn {
+      appearance: none;
+      border: none;
+      border-radius: 999px;
+      padding: 8px 14px;
+      font-weight: 700;
+      cursor: pointer;
+      background: #ffffff33;
+      color: #fff;
+      border: 1px solid #fff;
+    }
+    .btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+    /* Scene holds the dog image and floating dots */
+    .scene {
+      position: relative;
+      width: 100%;
+      height: calc(100vh - 62px);
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+
+    /* Inline dog image (SVG) as the main visual element */
+    .dog {
+      width: min(46vmin, 420px);
+      height: auto;
+      display: block;
+      /* a tiny wag animation to feel alive when you score */
+      animation: wag 1.5s ease-in-out infinite;
+      user-select: none;
+    }
+    @keyframes wag {
+      0%,100% { transform: rotate(0deg); }
+      50%     { transform: rotate(4deg); }
+    }
+
+    /* Floating dots (targets) */
+    .dot {
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      box-shadow: 0 0 6px rgba(0,0,0,.25);
+      cursor: pointer;
+      user-select: none;
+      transform: translateZ(0);
+      animation: drift 4s ease-in-out infinite;
+      border: 1px solid rgba(255,255,255,.5);
+    }
+    @keyframes drift {
+      0% { transform: translate(0, 0); }
+      50% { transform: translate(6px, -6px); }
+      100% { transform: translate(0, 0); }
+    }
+
+    /* End-of-game banner */
+    .gameOver {
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.6);
+      padding: 12px 16px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.25);
+      display: none;
+      text-align: center;
+      z-index: 4;
+    }
+    .gameOver.active {
+      display: block;
+    }
+
+    /* Small accessibility helper text for screen readers */
+    .sr-only {
+      position: absolute;
+      width: 1px; height: 1px;
+      padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0,0,0,0);
+      white-space: nowrap; border: 0;
+    }
+
+    @media (max-width: 700px) {
+      .hud { padding: 10px; }
+      .badge { padding: 6px 10px; font-size: 13px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="game" aria-label="Happy game playground">
+    <!-- HUD: score, time, restart -->
+    <section class="hud" aria-label="Game HUD">
+      <div class="left" aria-label="Score and timer">
+        <span class="badge" id="scoreLabel" aria-live="polite">Score: <strong id="score">0</strong></span>
+        <span class="badge" id="timeLabel" aria-live="polite">Time: <strong id="time">30</strong>s</span>
+      </div>
+      <div class="right" aria-label="Controls">
+        <button class="btn" id="restart" aria-label="Restart game (R)">Restart</button>
+      </div>
+    </section>
+
+    <!-- Scene with the provided image (here, an inline SVG dog acts as the main image) -->
+    <section class="scene" aria-label="Play area">
+      <!-- image→game mapping: using inline dog SVG as the main image representation -->
+      <div class="dog" role="img" aria-label="Happy pomeranian illustration">
+        <!-- Simple, cute pomeranian SVG (self-contained) -->
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 260" width="100%" height="100%" aria-label="Happy pomeranian illustration">
+          <defs>
+            <linearGradient id="fur" x1="0" x2="1" y1="0" y2="1">
+              <stop offset="0" stop-color="#f6c89a"/>
+              <stop offset="1" stop-color="#e0a067"/>
+            </linearGradient>
+            <radialGradient id="eye" cx="50%" cy="50%" r="50%">
+              <stop offset="0" stop-color="#fff"/>
+              <stop offset="1" stop-color="#000" stop-opacity="0.2"/>
+            </radialGradient>
+          </defs>
+
+          <!-- Body (fluffy) -->
+          <ellipse cx="160" cy="150" rx="120" ry="78" fill="url(#fur)"/>
+          <!-- Head -->
+          <ellipse cx="120" cy="92" rx="74" ry="62" fill="url(#fur)"/>
+          <!-- Ears -->
+          <path d="M60,78 L40,28 L92,60 Z" fill="#e29f55"/>
+          <path d="M174,68 L190,28 L150,54 Z" fill="#e29f55"/>
+          <!-- Eyes -->
+          <circle cx="100" cy="88" r="7" fill="#1a1a1a"/>
+          <circle cx="142" cy="90" r="7" fill="#1a1a1a"/>
+          <!-- Cheeks -->
+          <ellipse cx="110" cy="102" rx="16" ry="10" fill="#f9c2a7" opacity="0.7"/>
+          <!-- Nose & Mouth -->
+          <ellipse cx="119" cy="107" rx="8" ry="6" fill="#2b2b2b"/>
+          <path d="M120,112 q-6,6 -14,0" fill="none" stroke="#2b2b2b" stroke-width="2" />
+          <!-- Body fluff tail hint -->
+          <path d="M210,112 q60,20 40,60 q-20,34 -60,28 q-10,-2 -18,-6 q14,-26 8,-38 q-6,-12 -12,-18 z" fill="#f0b77e" opacity="0.9"/>
+        </svg>
+      </div>
+
+      <!-- Floating dots (collectables) -->
+      <div id="dots" aria-label="Floating colorful dots"></div>
+
+      <!-- End-of-game banner -->
+      <div id="gameOver" class="gameOver" aria-live="polite" aria-label="Game over banner">
+        <strong>Time's up!</strong>
+        <div>Your score: <span id="finalScore">0</span></div>
+        <button class="btn" id="restart2" aria-label="Play again">Play again</button>
+      </div>
+    </section>
+
+    <!-- Screen-reader hint (optional) -->
+    <span class="sr-only" aria-live="polite" id="srHint">Click or tap the colorful dots to score. The dog image is the main visual element.</span>
+  </main>
+
+  <script>
+    // Image→game mapping note:
+    // The provided image is represented here by a self-contained inline dog SVG,
+    // which serves as the main visual element of the game.
+
+    // Game elements
+    const scoreEl = document.getElementById('score');
+    const timeEl = document.getElementById('time');
+    const dotsContainer = document.getElementById('dots');
+    const restartBtn = document.getElementById('restart');
+    const restartBtn2 = document.getElementById('restart2');
+    const gameOverBanner = document.getElementById('gameOver');
+    const finalScoreEl = document.getElementById('finalScore');
+    const finalSrHint = document.getElementById('srHint');
+
+    // Game state
+    let score = 0;
+    let timeLeft = 30; // seconds
+    let spawnInterval = null;
+    let timerInterval = null;
+    let gameActive = false;
+
+    // Colors for dots
+    const colors = ['var(--dot1)', 'var(--dot2)', 'var(--dot3)', 'var(--dot4)'];
+
+    function rand(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    function createDot() {
+      const dot = document.createElement('div');
+      dot.className = 'dot';
+      dot.style.background = colors[Math.floor(Math.random() * colors.length)];
+
+      // Spawn within the play area (roughly around the dog, but anywhere on screen is fine)
+      const pad = 20;
+      const w = dotsContainer.clientWidth;
+      const h = dotsContainer.clientHeight;
+      const x = rand(pad, Math.max(pad, w - pad - 14));
+      const y = rand(pad, Math.max(pad, h - pad - 14));
+      dot.style.left = x + 'px';
+      dot.style.top  = y + 'px';
+
+      // Click/touch to collect
+      dot.addEventListener('pointerdown', () => {
+        // Remove and increment score
+        dot.remove();
+        score += 1;
+        scoreEl.textContent = String(score);
+      }, { passive: true });
+
+      // Optional auto-remove if not clicked (keep the arena tidy)
+      const life = rand(1800, 3200); // ms
+      const timeout = setTimeout(() => {
+        if (dot.parentNode) dot.remove();
+      }, life);
+
+      // Cleanup on removal
+      dot.addEventListener('remove', () => clearTimeout(timeout));
+      return dot;
+    }
+
+    function spawnDotsLoop() {
+      // Spawn a few dots over time; keep it light for quick play
+      const maxDots = 60; // total lifetime density cap
+      let spawned = 0;
+      spawnInterval = setInterval(() => {
+        if (!gameActive) return;
+        // random chance to add a dot
+        if (spawned < maxDots && Math.random() < 0.9) {
+          const d = createDot();
+          dotsContainer.appendChild(d);
+          spawned++;
+        }
+      }, 350);
+    }
+
+    function clearDots() {
+      while (dotsContainer.firstChild) {
+        dotsContainer.removeChild(dotsContainer.firstChild);
+      }
+    }
+
+    function startGame() {
+      // Reset state
+      score = 0;
+      timeLeft = 30;
+      scoreEl.textContent = '0';
+      timeEl.textContent = '30';
+      gameOverBanner.classList.remove('active');
+      finalScoreEl.textContent = '0';
+      finalSrHint.textContent = 'Click or tap the dots to score. The dog image is the main visual element.';
+
+      clearDots();
+      gameActive = true;
+
+      // Start timers
+      if (timerInterval) clearInterval(timerInterval);
+      timerInterval = setInterval(() => {
+        timeLeft--;
+        timeEl.textContent = String(timeLeft);
+        if (timeLeft <= 0) endGame();
+      }, 1000);
+
+      // Start spawning
+      spawnDotsLoop();
+    }
+
+    function endGame() {
+      gameActive = false;
+      if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+      if (spawnInterval) { clearInterval(spawnInterval); spawnInterval = null; }
+      // Stop adding new dots and show final score
+      finalScoreEl.textContent = String(score);
+      gameOverBanner.classList.add('active');
+    }
+
+    // Event bindings
+    restartBtn.addEventListener('click', startGame);
+    restartBtn2.addEventListener('click', startGame);
+
+    // Keyboard shortcut for quick restart
+    window.addEventListener('keydown', (e) => {
+      if (e.key.toLowerCase() === 'r') {
+        startGame();
+      }
+    });
+
+    // Initialize
+    window.addEventListener('load', () => {
+      // Start instantly for instant play
+      startGame();
+      // Focus for accessibility
+      restartBtn.focus();
+    });
+
+  </script>
+</body>
+</html>

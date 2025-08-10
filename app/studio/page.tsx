@@ -1,14 +1,13 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { generateRandomSlug } from "@/lib/utils";
 
 export default function StudioPage() {
   const [prompt, setPrompt] = useState("");
-  const [html, setHtml] = useState<string>("");
   const [slug, setSlug] = useState("");
   const [isPending, startTransition] = useTransition();
   const [imageDataUrl, setImageDataUrl] = useState<string>("");
-  const [isSaving, setIsSaving] = useState(false);
   const [status, setStatus] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
@@ -32,12 +31,18 @@ export default function StudioPage() {
 
   async function generate() {
     if (!prompt.trim()) return;
+    let finalSlug = slug.trim();
+    if (!finalSlug) {
+      finalSlug = generateRandomSlug();
+      setSlug(finalSlug);
+    }
     setError(null);
     setStatus("Generating...");
     const startedAt = Date.now();
     console.log("[studio] generate start", {
       promptLength: prompt.length,
       hasImage: Boolean(imageDataUrl),
+      slugLength: finalSlug.length,
     });
     startTransition(async () => {
       try {
@@ -47,6 +52,7 @@ export default function StudioPage() {
           body: JSON.stringify({
             prompt,
             imageDataUrl: imageDataUrl || undefined,
+            slug: finalSlug,
           }),
         });
         if (!res.ok) {
@@ -56,13 +62,16 @@ export default function StudioPage() {
           );
         }
         const data = await res.json();
-        setHtml(data.html ?? "");
         const durationMs = Date.now() - startedAt;
         console.log("[studio] generate success", {
           durationMs,
-          htmlLength: (data.html ?? "").length,
+          hasUrl: Boolean(data?.url),
         });
-        setStatus("Generation complete");
+        if (data?.url) {
+          window.location.href = data.url as string;
+          return;
+        }
+        setStatus("Generation complete (no URL returned)");
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error("[studio] generate error", { message });
@@ -72,43 +81,7 @@ export default function StudioPage() {
     });
   }
 
-  async function save() {
-    if (!html || !slug.trim()) return;
-    setError(null);
-    setStatus("Saving...");
-    setIsSaving(true);
-    const startedAt = Date.now();
-    console.log("[studio] save start", {
-      slugLength: slug.length,
-      htmlLength: html.length,
-    });
-    try {
-      const res = await fetch("/api/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html, slug }),
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(
-          `Request failed: ${res.status} ${res.statusText} - ${text}`
-        );
-      }
-      const data = await res.json();
-      const durationMs = Date.now() - startedAt;
-      console.log("[studio] save success", { durationMs, url: data.url });
-      if (data.url) {
-        window.location.href = data.url as string;
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error("[studio] save error", { message });
-      setError(message);
-      setStatus("");
-    } finally {
-      setIsSaving(false);
-    }
-  }
+  // Save step removed: generation now persists directly when a slug is provided
 
   return (
     <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -123,14 +96,14 @@ export default function StudioPage() {
         <div className="flex gap-2">
           <button
             onClick={generate}
-            disabled={isPending || isSaving}
+            disabled={isPending}
             className="px-4 py-2 bg-black text-white rounded disabled:opacity-50"
           >
             <span className="inline-flex items-center gap-2">
               {isPending && (
                 <span className="inline-block w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
               )}
-              {isPending ? "Generating..." : "Generate"}
+              {isPending ? "Generating..." : "Generate & Save"}
             </span>
           </button>
           <label className="px-3 py-2 border rounded cursor-pointer">
@@ -144,22 +117,11 @@ export default function StudioPage() {
           </label>
           <input
             className="border rounded px-2"
-            placeholder="slug (e.g. login-page)"
+            placeholder="slug (optional; auto-generated if empty)"
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
           />
-          <button
-            onClick={save}
-            disabled={!html || !slug || isPending || isSaving}
-            className="px-4 py-2 border rounded disabled:opacity-50"
-          >
-            <span className="inline-flex items-center gap-2">
-              {isSaving && (
-                <span className="inline-block w-4 h-4 border-2 border-black/40 border-t-black rounded-full animate-spin" />
-              )}
-              {isSaving ? "Saving..." : "Save & Open"}
-            </span>
-          </button>
+          {/* Saving is now part of generation */}
         </div>
         {(status || error) && (
           <div className="mt-3 text-sm">
@@ -169,24 +131,17 @@ export default function StudioPage() {
         )}
       </div>
       <div>
-        <h2 className="text-xl font-semibold mb-2">Live Preview</h2>
-        <div className="relative border rounded min-h-40">
-          {html ? (
-            <iframe
-              title="preview"
-              className="w-full h-[70vh]"
-              srcDoc={html}
-              sandbox="allow-scripts allow-forms allow-popups allow-same-origin"
-            />
+        <h2 className="text-xl font-semibold mb-2">Saved Page</h2>
+        <div className="relative border rounded min-h-40 p-4 text-gray-600">
+          {isPending ? (
+            <div className="flex items-center gap-3">
+              <span className="inline-block w-6 h-6 border-2 border-gray-400 border-t-black rounded-full animate-spin" />
+              Generating and saving...
+            </div>
           ) : (
-            <div className="p-4 text-gray-500">No preview yet</div>
-          )}
-          {isPending && (
-            <div className="absolute inset-0 bg-white/60 backdrop-blur-sm flex items-center justify-center rounded">
-              <div className="flex items-center gap-3 text-gray-800">
-                <span className="inline-block w-6 h-6 border-2 border-gray-400 border-t-black rounded-full animate-spin" />
-                Generating preview...
-              </div>
+            <div>
+              Click "Generate & Save". You'll be redirected to /generated/
+              {slug || "your-slug"} when done.
             </div>
           )}
         </div>

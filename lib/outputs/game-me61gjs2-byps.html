@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Photo Pounce — Jump & Move</title>
+<style>
+  :root { --accent:#ffb56b; --ob:#4a7bd9; }
+  html,body { height:100%; margin:0; font-family:system-ui,Segoe UI,Arial,sans-serif; background:#111; color:#fff; }
+  header { text-align:center; padding:8px 10px; }
+  header small { color:#cfe3ff; display:block; }
+  #wrap { max-width:920px; margin:0 auto; padding:6px 10px 16px; }
+  #hud { display:flex; gap:12px; justify-content:space-between; align-items:center; margin:4px 0 8px; flex-wrap:wrap; }
+  #score, #time { font-weight:700; background:#0008; padding:6px 10px; border-radius:8px; }
+  #instructions { flex:1; min-width:240px; color:#d9f1ff; opacity:.95; }
+  #instructions b { color:#fff; }
+  #gameArea { position:relative; width:100%; aspect-ratio:16/9; background:#0a1c3a; border-radius:12px; overflow:hidden; box-shadow:0 8px 30px #0007; }
+  canvas { width:100%; height:100%; display:block; outline:none; }
+  #buttons { position:absolute; left:0; right:0; bottom:6px; display:flex; justify-content:space-between; pointer-events:none; padding:0 8px; gap:8px; }
+  .pad { pointer-events:auto; user-select:none; touch-action:none; flex:1; text-align:center; padding:10px 0; background:#0007; border:1px solid #fff2; border-radius:10px; font-size:18px; }
+  .pad:active { background:#fff2; color:#000; }
+  #restart { background:var(--accent); color:#000; border:none; padding:8px 12px; border-radius:10px; font-weight:700; cursor:pointer; }
+  #restart:focus { outline:2px solid #fff; }
+  #over { position:absolute; inset:0; display:none; place-items:center; background:#0009; text-align:center; padding:20px; }
+  #over .card { background:#0b203f; padding:16px 18px; border-radius:12px; border:1px solid #fff2; }
+  #cred { text-align:center; font-size:12px; color:#aad; margin-top:6px; opacity:.85;}
+  /* visually-hidden but still accessible */
+  .visually-hidden { position:absolute !important; height:1px; width:1px; overflow:hidden; clip:rect(1px,1px,1px,1px); white-space:nowrap; border:0; padding:0; margin:-1px; }
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <header>
+      <h1 aria-label="Photo Pounce: Jump and Move">Photo Pounce</h1>
+      <small>Run with your photo, jump over obstacles, collect color orbs. 45 seconds to score big!</small>
+    </header>
+
+    <div id="hud" role="toolbar" aria-label="Game status and controls">
+      <div id="score" aria-live="polite">Score: 0</div>
+      <div id="time" aria-live="polite">Time: 45</div>
+      <div id="instructions">
+        Controls: <b>A/D or ◀/▶</b> to move, <b>Space/▲</b> to jump. On touch, use the on-screen buttons. Avoid blue blocks, collect orange orbs.
+      </div>
+      <button id="restart" aria-label="Restart game">Restart</button>
+    </div>
+
+    <div id="gameArea" role="application" aria-label="Jump-and-move game area">
+      <canvas id="game" tabindex="0" aria-label="Game canvas"></canvas>
+
+      <!-- On-screen controls for touch -->
+      <div id="buttons" aria-hidden="false">
+        <div class="pad" id="btnLeft" aria-label="Move left" role="button">◀ Left</div>
+        <div class="pad" id="btnJump" aria-label="Jump" role="button">⤒ Jump</div>
+        <div class="pad" id="btnRight" aria-label="Move right" role="button">Right ▶</div>
+      </div>
+
+      <!-- Game over overlay -->
+      <div id="over" aria-live="assertive">
+        <div class="card">
+          <h2 style="margin:6px 0;">Run over!</h2>
+          <p id="final">Score: 0</p>
+          <button id="restart2" aria-label="Play again" style="background:var(--accent); border:none; padding:8px 14px; border-radius:10px; font-weight:700;">Play again</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="cred">Your image powers the background and the player avatar.</div>
+  </div>
+
+  <!-- Provided image goes here; if none is available, we replace it with the inline SVG below -->
+  <img id="userPhoto" alt="Your picture used in the game (hidden copy)" style="display:none; max-width:100%;" />
+
+  <!-- Inline SVG placeholder if no image is provided -->
+  <svg id="fallbackSVG" class="visually-hidden" xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360" aria-hidden="true">
+    <defs>
+      <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#1846b6"/>
+        <stop offset="1" stop-color="#0b2e77"/>
+      </linearGradient>
+    </defs>
+    <rect width="640" height="360" fill="url(#g)"/>
+    <circle cx="220" cy="210" r="88" fill="#ffb56b" opacity=".9"/>
+    <circle cx="240" cy="190" r="68" fill="#ffd7a5" opacity=".9"/>
+    <rect x="40" y="300" width="560" height="14" rx="6" fill="#ffffff50"/>
+    <text x="50%" y="60" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="26">Drop in your photo or play with this placeholder</text>
+  </svg>
+
+<script>
+/* Simple runner/platformer that uses the user's image:
+   - The image is painted as a scrolling background.
+   - A circular avatar is cut from the center of the user's image.
+   - Colors are sampled: blue-ish area becomes obstacle color, orange-ish center becomes collectible color. */
+
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d', { alpha: false });
+
+  const userImg = document.getElementById('userPhoto');
+  const fallbackSVG = document.getElementById('fallbackSVG');
+
+  // If the environment provides an image source, use it; otherwise make a SVG data URL placeholder
+  function ensureImage() {
+    return new Promise(res => {
+      const onReady = () => res();
+      const tryLoad = () => {
+        if (userImg.complete && userImg.naturalWidth > 0) return res();
+        userImg.addEventListener('load', onReady, { once:true });
+        userImg.addEventListener('error', () => {
+          // Use inline SVG placeholder as data URL
+          const raw = new XMLSerializer().serializeToString(fallbackSVG);
+          userImg.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(raw);
+        }, { once:true });
+      };
+      // If no src is present, immediately trigger error handler by setting invalid src then fallback
+      if (!userImg.getAttribute('src')) {
+        userImg.addEventListener('error', () => {
+          const raw = new XMLSerializer().serializeToString(fallbackSVG);
+          userImg.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(raw);
+        }, { once:true });
+        userImg.src = 'data:,'; // forces error to activate fallback
+      }
+      tryLoad();
+    });
+  }
+
+  // Game state
+  let W = 960, H = 540;
+  const groundRatio = 0.82;
+  let groundY = 0;
+
+  const keys = { left:false, right:false, jump:false };
+  let running = false, gameOver = false;
+  let tLeft = 45; // seconds
+  let score = 0;
+  let last = 0;
+
+  const player = { x:90, y:0, w:64, h:64, vy:0, onGround:false, speed:4.2 };
+  const obs = [];
+  const orbs = [];
+  let spawnO = 0, spawnC = 0, speed = 3.2, bgOff = 0;
+
+  // Colors derived from image
+  let COL_ORB = getCSS('--accent') || '#ffb56b';
+  let COL_OBS = getCSS('--ob') || '#4a7bd9';
+
+  // Offscreen avatar created from the image center
+  const avatar = document.createElement('canvas');
+  const aCtx = avatar.getContext('2d');
+
+  function getCSS(v) {
+    return getComputedStyle(document.documentElement).getPropertyValue(v)?.trim();
+  }
+
+  function fitCanvas() {
+    const rect = document.getElementById('gameArea').getBoundingClientRect();
+    W = canvas.width = Math.floor(rect.width);
+    H = canvas.height = Math.floor(rect.height);
+    player.h = player.w = Math.max(56, Math.floor(H * 0.09));
+    groundY = Math.floor(H * groundRatio);
+    if (player.y === 0) player.y = groundY - player.h;
+  }
+
+  function sampleColorsFromImage() {
+    // Sample top band (background blue) and center (subject/orange) to tint elements
+    const tmp = document.createElement('canvas');
+    const tctx = tmp.getContext('2d', { willReadFrequently:true });
+    const iw = userImg.naturalWidth, ih = userImg.naturalHeight;
+    tmp.width = iw; tmp.height = ih;
+    tctx.drawImage(userImg, 0, 0);
+
+    function avgRect(x, y, w, h) {
+      const d = tctx.getImageData(x, y, w, h).data;
+      let r=0,g=0,b=0, n=w*h;
+      for (let i=0;i<d.length;i+=4){ r+=d[i]; g+=d[i+1]; b+=d[i+2]; }
+      r = Math.round(r/(d.length/4)); g = Math.round(g/(d.length/4)); b = Math.round(b/(d.length/4));
+      return [r,g,b];
+    }
+    const top = avgRect(0, 0, iw, Math.max(4, Math.floor(ih*0.25)));
+    const centerSize = Math.floor(Math.min(iw, ih)*0.35);
+    const cx = Math.floor(iw/2 - centerSize/2), cy = Math.floor(ih/2 - centerSize/2);
+    const mid = avgRect(cx, cy, centerSize, centerSize);
+
+    function toHex([r,g,b]) {
+      return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join('');
+    }
+    COL_OBS = toHex(shift(top, -10)); // darker blue-ish for obstacles
+    COL_ORB = toHex(shift(mid, 15));  // brighter center for collectibles
+
+    // Build circular avatar from image center
+    const A = 160;
+    avatar.width = A; avatar.height = A;
+    aCtx.clearRect(0,0,A,A);
+    aCtx.save();
+    aCtx.beginPath(); aCtx.arc(A/2, A/2, A/2, 0, Math.PI*2); aCtx.clip();
+    // Scale to fit smallest side
+    const scale = A / Math.min(iw, ih);
+    const dx = A/2 - (iw*scale)/2;
+    const dy = A/2 - (ih*scale)/2;
+    aCtx.drawImage(userImg, dx, dy, iw*scale, ih*scale);
+    aCtx.restore();
+
+    function shift(rgb, amt){
+      return rgb.map((v,i)=> i<3 ? Math.max(0, Math.min(255, v+amt)) : v);
+    }
+  }
+
+  function spawnObstacle() {
+    const h = randInt(Math.max(22, H*0.05), Math.max(38, H*0.12));
+    const w = randInt(h*0.7, h*1.6);
+    obs.push({ x: W+20, y: groundY - h, w, h });
+  }
+  function spawnOrb() {
+    const r = Math.max(10, Math.floor(player.w*0.35));
+    const y = randInt(Math.floor(H*0.35), Math.floor(groundY - player.h*1.2));
+    orbs.push({ x: W+20, y, r });
+  }
+
+  function reset() {
+    running = true; gameOver = false;
+    score = 0; tLeft = 45; speed = 3.2; bgOff = 0;
+    player.x = Math.max(60, Math.floor(W*0.08));
+    player.y = groundY - player.h; player.vy = 0; player.onGround = true;
+    obs.length = 0; orbs.length = 0; spawnO = 0; spawnC = 0;
+    last = performance.now();
+    document.getElementById('over').style.display = 'none';
+    document.getElementById('score').textContent = 'Score: 0';
+    document.getElementById('time').textContent = 'Time: 45';
+    tick(last);
+  }
+
+  function endRun(msg) {
+    running = false; gameOver = true;
+    const final = document.getElementById('final');
+    final.textContent = (msg || 'Run over!') + ' Score: ' + Math.floor(score);
+    document.getElementById('over').style.display = 'grid';
+  }
+
+  function tick(now) {
+    if (!running) return;
+    const dt = Math.min(0.05, (now - last) / 1000); // clamp dt
+    last = now;
+    tLeft -= dt;
+    if (tLeft <= 0) {
+      tLeft = 0;
+      document.getElementById('time').textContent = 'Time: 0';
+      endRun('Time up!');
+      draw(); // final frame
+      return;
+    }
+    document.getElementById('time').textContent = 'Time: ' + Math.ceil(tLeft);
+
+    // Background scroll speed
+    bgOff += speed * 0.5;
+
+    // Player horizontal movement
+    const dir = (keys.right?1:0) - (keys.left?1:0);
+    player.x += dir * player.speed;
+    player.x = Math.max(8, Math.min(W - player.w - 8, player.x));
+
+    // Jump physics
+    player.vy += H * 0.0015; // gravity scaled to canvas
+    player.y += player.vy;
+    if (player.y + player.h >= groundY) {
+      player.y = groundY - player.h;
+      player.vy = 0;
+      player.onGround = true;
+    }
+
+    // Spawning
+    spawnO -= dt; spawnC -= dt;
+    if (spawnO <= 0) {
+      spawnObstacle();
+      spawnO = rand(0.9, 1.6) / (1 + score*0.002);
+    }
+    if (spawnC <= 0) {
+      spawnOrb();
+      spawnC = rand(0.7, 1.0);
+    }
+
+    // Move entities
+    const vx = speed * (W/600);
+    for (const o of obs) o.x -= vx;
+    for (const c of orbs) c.x -= vx;
+
+    // Clean up off-screen
+    while (obs.length && obs[0].x + obs[0].w < -20) obs.shift();
+    while (orbs.length && orbs[0].x + orbs[0].r < -20) orbs.shift();
+
+    // Collisions
+    for (const o of obs) {
+      if (rectsIntersect(player, o)) {
+        endRun('Ouch! Hit an obstacle.');
+        break;
+      }
+    }
+    for (let i=orbs.length-1;i>=0;i--) {
+      const c = orbs[i];
+      const px = player.x + player.w/2, py = player.y + player.h/2;
+      const dx = Math.abs(px - (c.x + c.r)), dy = Math.abs(py - (c.y + c.r));
+      const pr = Math.min(player.w, player.h)/2;
+      if (dx*dx + dy*dy < (c.r + pr*0.6)*(c.r + pr*0.6)) {
+        orbs.splice(i,1);
+        score += 7;
+        speed += 0.05;
+        document.getElementById('score').textContent = 'Score: ' + Math.floor(score);
+      }
+    }
+
+    // Passive score over time
+    score += dt * 3;
+    document.getElementById('score').textContent = 'Score: ' + Math.floor(score);
+
+    draw();
+    requestAnimationFrame(tick);
+  }
+
+  function draw() {
+    // Background: draw the user's image as a scrolling cover
+    ctx.fillStyle = '#0a1c3a';
+    ctx.fillRect(0,0,W,H);
+
+    if (userImg.complete && userImg.naturalWidth > 0) {
+      const iw = userImg.naturalWidth, ih = userImg.naturalHeight;
+      const scale = Math.max(W/iw, H/ih);
+      const dw = iw*scale, dh = ih*scale;
+      const ox = -((bgOff % dw));
+      for (let x = ox - dw; x < W + dw; x += dw) {
+        ctx.drawImage(userImg, x, 0, dw, dh);
+      }
+      // A light haze to keep foreground readable
+      ctx.fillStyle = '#00000055';
+      ctx.fillRect(0,0,W,H);
+    }
+
+    // Ground
+    ctx.fillStyle = '#ffffff25';
+    ctx.fillRect(0, groundY, W, H-groundY);
+
+    // Obstacles
+    ctx.fillStyle = COL_OBS + 'ee'.replace('ee',''); // solid fallback
+    ctx.shadowColor = '#0008'; ctx.shadowBlur = 8;
+    for (const o of obs) {
+      ctx.fillStyle = COL_OBS;
+      roundRect(ctx, o.x, o.y, o.w, o.h, 6); ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+
+    // Orbs (collectibles)
+    for (const c of orbs) {
+      const grd = ctx.createRadialGradient(c.x+c.r, c.y+c.r, c.r*0.2, c.x+c.r, c.y+c.r, c.r);
+      grd.addColorStop(0, '#fff');
+      grd.addColorStop(0.3, lighten(COL_ORB, 20));
+      grd.addColorStop(1, darken(COL_ORB, 15));
+      ctx.fillStyle = grd;
+      circle(ctx, c.x+c.r, c.y+c.r, c.r); ctx.fill();
+      ctx.strokeStyle = '#0007'; ctx.lineWidth = 2; ctx.stroke();
+    }
+
+    // Player avatar (circular cut from user's image)
+    const pr = Math.min(player.w, player.h)/2;
+    ctx.save();
+    circle(ctx, player.x + pr, player.y + pr, pr); ctx.clip();
+    if (avatar.width > 0) {
+      ctx.drawImage(avatar, player.x, player.y, player.w, player.h);
+    } else {
+      // Fallback: colored circle
+      ctx.fillStyle = '#ffd7a5';
+      ctx.fillRect(player.x, player.y, player.w, player.h);
+    }
+    ctx.restore();
+    ctx.strokeStyle = '#0009'; ctx.lineWidth = 3;
+    circle(ctx, player.x + pr, player.y + pr, pr); ctx.stroke();
+  }
+
+  // Helpers
+  function circle(c, x,y,r){ c.beginPath(); c.arc(x,y,r,0,Math.PI*2); }
+  function roundRect(c,x,y,w,h,r){ c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
+  function rand(a,b){ return a + Math.random()*(b-a); }
+  function randInt(a,b){ return Math.floor(rand(a,b)); }
+  function rectsIntersect(a,b){ return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
+  function hexToRgb(h){ const v = h.replace('#',''); const n = parseInt(v,16); if (v.length===6) return [n>>16 & 255, n>>8 & 255, n & 255]; return [255,255,255]; }
+  function rgbToHex([r,g,b]){ return '#'+[r,g,b].map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join(''); }
+  function lighten(hex, amt){ const rgb = hexToRgb(hex).map(v=>v + amt); return rgbToHex(rgb); }
+  function darken(hex, amt){ const rgb = hexToRgb(hex).map(v=>v - amt); return rgbToHex(rgb); }
+
+  // Input
+  function setKey(k, v){
+    if (k === 'ArrowLeft' || k === 'a') keys.left = v;
+    if (k === 'ArrowRight' || k === 'd') keys.right = v;
+    if (k === 'ArrowUp' || k === ' ' || k === 'w') { if (v) jump(); }
+  }
+  function jump(){
+    if (player.onGround) { player.vy = -Math.max(8.5, H*0.017); player.onGround = false; }
+  }
+  document.addEventListener('keydown', e => { setKey(e.key, true); if(['ArrowLeft','ArrowRight','ArrowUp',' ','a','d','w'].includes(e.key)) e.preventDefault(); });
+  document.addEventListener('keyup',   e => setKey(e.key, false));
+  canvas.addEventListener('pointerdown', e => { // tap to jump
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    if (x < rect.width*0.33) keys.left = true;
+    else if (x > rect.width*0.66) keys.right = true;
+    else jump();
+  });
+  canvas.addEventListener('pointerup', e => { keys.left=false; keys.right=false; });
+
+  // On-screen buttons (touch)
+  const btnL = document.getElementById('btnLeft');
+  const btnR = document.getElementById('btnRight');
+  const btnJ = document.getElementById('btnJump');
+  function bindPad(el, down, up){
+    const set = v => down(v);
+    el.addEventListener('pointerdown', e => { e.preventDefault(); set(true); });
+    ['pointerup','pointerleave','pointercancel'].forEach(t => el.addEventListener(t, () => up(false)));
+  }
+  bindPad(btnL, v=>{keys.left=v;}, v=>{keys.left=v;});
+  bindPad(btnR, v=>{keys.right=v;}, v=>{keys.right=v;});
+  bindPad(btnJ, ()=>jump(), ()=>{});
+
+  // Restart buttons
+  document.getElementById('restart').addEventListener('click', reset);
+  document.getElementById('restart2').addEventListener('click', reset);
+
+  // Resize handling
+  const ro = new ResizeObserver(fitCanvas);
+  ro.observe(document.getElementById('gameArea'));
+
+  // Setup
+  (async function init(){
+    fitCanvas();
+    await ensureImage();
+    sampleColorsFromImage();
+    // Focus canvas for keyboard right away
+    setTimeout(()=>canvas.focus(), 50);
+    reset();
+  })();
+})();
+</script>
+</body>
+</html>

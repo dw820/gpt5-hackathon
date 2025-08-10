@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Jumping Pom - A Tiny Dog Jump Game</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{
+      --bg1:#0a6bdc;
+      --bg2:#0a4fb4;
+      --fg:#f8f8f8;
+      --accent:#ffb347;
+      --bone:#ffffff;
+      --panel:#1a1a1a;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;height:100%}
+    body{
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial;
+      background: linear-gradient(#eaf3ff 0%, #d7e8ff 60%, #cce0ff 100%);
+      color:#111;
+      display:flex;flex-direction:column;min-height:100%;
+      align-items:center;gap:12px;
+    }
+    header{width:100%;max-width:980px;padding:16px 12px 0 12px}
+    h1{font-size: clamp(1.2rem, 2.5vw + 1rem, 2rem); margin:0; color:#1a2a64}
+    .subtitle{font-size:0.9rem;color:#334;opacity:.8}
+    main{width:100%;max-width:980px;padding:0 12px 20px}
+    .game-panel{
+      position:relative;
+      width:100%;aspect-ratio: 16 / 9;
+      background: #1b74d2;
+      border-radius:14px;
+      overflow:hidden;
+      box-shadow: 0 6px 20px rgba(0,0,0,.15);
+      display:flex;align-items:center;justify-content:center;
+      isolation:isolate;
+    }
+    canvas{ width:100%; height:100%; display:block; }
+    /* HUD overlay (top of canvas) for score/time */
+    .hud{
+      position:absolute; top:8px; left:8px; right:8px;
+      display:flex; justify-content:space-between; align-items:center;
+      padding:8px 10px; border-radius:10px;
+      background: rgba(0,0,0,.25);
+      color:#fff; font-family: monospace;
+      pointer-events:none;
+    }
+    .hud .left, .hud .right{ display:flex; gap:12px; align-items:center; }
+    .badge{ background: rgba(0,0,0,.25); padding:6px 10px; border-radius:8px; font-weight:600; }
+    button, details > summary{
+      cursor: pointer;
+      border:1px solid rgba(255,255,255,.6);
+      background: rgba(255,255,255,.12);
+      color:white; padding:8px 12px; border-radius:8px;
+      font-weight:600;
+    }
+    button{ outline: none; }
+    button:focus-visible{ box-shadow:0 0 0 3px rgba(255,255,255,.8); }
+    .controls{ display:flex; gap:8px; align-items:center; }
+    .sr-only{ position:absolute; left:-10000px; top:auto; width:1px; height:1px; overflow:hidden; }
+    .overlay{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:20px; background: rgba(0,0,0,.25); color:#fff; font-size:1.1rem; text-align:center; }
+    .panel{ background: rgba(0,0,0,.6); padding:14px; border-radius:12px; max-width: 680px; }
+    details{ margin-top:8px; }
+    summary{ list-style:none; outline:none; }
+    .legend{ font-size:.9rem; opacity:.95; }
+    @media (max-width: 720px){
+      header{ padding:12px 8px 0 8px }
+      .hud{ font-size: .9rem; }
+      .panel{ font-size:.95rem; }
+    }
+  </style>
+</head>
+<body>
+  <header aria-label="Game header">
+    <h1>Jumping Pom</h1>
+    <div class="subtitle" aria-live="polite">A tiny jumping game inspired by a fluffy buddy. Use space/up or tap to jump. Collect bones, dodge gaps, beat the clock.</div>
+  </header>
+
+  <main aria-label="Game area">
+    <section class="game-panel" id="gamePanel" aria-label="Jumping Pom game panel">
+      <canvas id="gameCanvas" width="800" height="450" aria-label="Game canvas"></canvas>
+
+      <!-- HUD: shows score and time; controls are accessible via keyboard/touch -->
+      <div class="hud" role="region" aria-label="Game HUD">
+        <div class="left">
+          <span class="badge" id="scoreBadge" aria-label="Score">Score: 0</span>
+          <span class="badge" id="bonesLeft" aria-label="Bones left">Bones: 8</span>
+        </div>
+        <div class="right controls" aria-label="Game controls">
+          <button id="restartBtn" aria-label="Restart game">Restart</button>
+          <button id="muteBtn" aria-label="Toggle sound" title="Mute/Unmute">Sound: On</button>
+        </div>
+      </div>
+      <!-- How to play (always visible for discoverability) -->
+      <div class="panel" aria-label="How to play">
+        <strong>How to play</strong>
+        <ul class="legend" style="margin:6px 0 0 16px; padding:0;">
+          <li>Press Space or Up to jump. Tap/click to jump on touch devices.</li>
+          <li>Collect all bones before the timer runs out. You win when bones are gone or time runs out with a high score.</li>
+          <li>Use Restart to try again. Sound can be muted with the Sound button.</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <!-- Invisible image used as the core asset (embedded, self-contained). 
+       This is a stylized dog illustration inspired by the provided image's palette. -->
+  <img id="userInspiredDog" alt="User-inspired dog illustration" style="display:none" />
+
+  <!-- Inline script: self-contained game logic -->
+  <script>
+  /*
+    Image→game mapping (concise):
+    - The provided fluffy Pomeranian image inspired the color palette (orange/white fur and blue background)
+      and motivated a playful "bone" collectible theme and a friendly dog sprite.
+    - In this self-contained version, we inline a small SVG dog as the main sprite to reflect
+      the image's vibe without external assets.
+    - The blue gradient world and orange-white bones mirror the image's color identity.
+  */
+
+  (function(){
+    // Canvas setup
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+
+    // Simple WebAudio beeps
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    let audioCtx = null;
+    let soundOn = true;
+    function ensureAudio(){ if(!audioCtx){ audioCtx = new AudioCtx(); } }
+
+    function beep(freq=440, duration=0.08){
+      if(!soundOn) return;
+      ensureAudio();
+      const ctx = audioCtx;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = freq;
+      osc.type = 'triangle';
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      const t = ctx.currentTime;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.2, t + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+      osc.start(t);
+      osc.stop(t + duration + 0.02);
+    }
+
+    // Dog sprite (inline SVG data URL to keep it self-contained)
+    const DOG_SVG = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="128" height="96" viewBox="0 0 128 96">
+        <defs>
+          <linearGradient id="fur" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#FFD4A3"/>
+            <stop offset="0.6" stop-color="#F9A74B"/>
+            <stop offset="1" stop-color="#FFFFFF"/>
+          </linearGradient>
+        </defs>
+        <ellipse cx="64" cy="58" rx="34" ry="24" fill="url(#fur)"/>
+        <ellipse cx="43" cy="56" rx="12" ry="14" fill="#fff"/>
+        <ellipse cx="85" cy="56" rx="12" ry="14" fill="#fff"/>
+        <polygon points="43,22 35,38 51,36" fill="#F79A2E"/>
+        <polygon points="83,22 95,38 75,36" fill="#F79A2E"/>
+        <circle cx="54" cy="56" r="5" fill="#1a1a1a"/>
+        <circle cx="78" cy="56" r="5" fill="#1a1a1a"/>
+        <path d="M40,66 q12,6 24,0" stroke="#E86" stroke-width="3" fill="none" stroke-linecap="round"/>
+      </svg>`;
+    const dogImg = new Image();
+    dogImg.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(DOG_SVG);
+    let dogImgReady = false;
+    dogImg.onload = ()=>{ dogImgReady = true; };
+
+    // Game state
+    const game = {
+      w: W, h: H,
+      groundY: 360,
+      dog: { w: 54, h: 42, x: 120, y: 0, vy: 0, onGround: false, jumpBoost: 0 },
+      gravity: 0.48,
+      platforms: [],
+      bones: [],
+      boneRadius: 10,
+      boneCount: 8,
+      cameraX: 0,
+      score: 0,
+      timeLeft: 60,
+      running: true,
+      won: false,
+      muted: false
+    };
+
+    // Keyboard / touch handling
+    let jumpPressed = false;
+    function onJumpRequest(){
+      if(!game.running) return;
+      if(game.dog.onGround){
+        game.dog.vy = -9.2;
+        game.dog.onGround = false;
+        game.dog.jumpBoost = 0;
+        beep(650, 0.12);
+      } else {
+        // small mid-air boost
+        if(game.dog.jumpBoost < 1){
+          game.dog.vy = -7.5;
+          game.dog.jumpBoost = 1;
+          beep(520, 0.08);
+        }
+      }
+    }
+
+    window.addEventListener('keydown', (e)=>{
+      if(e.code === 'Space' || e.code === 'ArrowUp'){
+        e.preventDefault();
+        onJumpRequest();
+      }
+    });
+    window.addEventListener('touchstart', (e)=>{
+      // Jump on touch
+      e.preventDefault();
+      onJumpRequest();
+    }, {passive:false});
+
+    // UI controls
+    const scoreBadge = document.getElementById('scoreBadge');
+    const bonesLeftBadge = document.getElementById('bonesLeft');
+    const restartBtn = document.getElementById('restartBtn');
+    const muteBtn = document.getElementById('muteBtn');
+
+    restartBtn.addEventListener('click', restartGame);
+    muteBtn.addEventListener('click', ()=>{
+      soundOn = !soundOn;
+      muteBtn.textContent = soundOn ? 'Sound: On' : 'Sound: Off';
+      muteBtn.setAttribute('aria-label', 'Sound: ' + (soundOn ? 'On' : 'Off'));
+    });
+
+    function restartGame(){
+      // reset core state
+      game.dog.x = 120;
+      game.dog.y = 0;
+      game.dog.vy = 0;
+      game.dog.onGround = false;
+      game.cameraX = 0;
+      game.score = 0;
+      game.timeLeft = 60;
+      game.platforms = [];
+      game.bones = [];
+      game.won = false;
+      game.running = true;
+      // rebuild level
+      buildLevel();
+      // redraw immediately
+      lastTime = performance.now();
+      requestAnimationFrame(loop);
+    }
+
+    // Level generation
+    function buildLevel(){
+      game.platforms = [];
+      // ground platform
+      game.platforms.push({ x: -100, y: 380, w: 1200, h: 20 });
+      // floating platforms (vary heights; inspired by the game's jumping theme)
+      const platYs = [300, 260, 320, 240, 290];
+      for(let i=0; i<5; i++){
+        const px = 200 + i * 240;
+        const py = platYs[i % platYs.length];
+        game.platforms.push({ x: px, y: py, w: 120, h: 16 });
+      }
+      // Bones positioned along the path
+      game.bones = [];
+      const totalBones = 8;
+      for(let i=0; i<totalBones; i++){
+        const boneX = 260 + i * 260;
+        const boneY = 320 - (i % 3) * 40 + ((i%2) ? -8 : 0);
+        game.bones.push({ x: boneX, y: boneY, collected: false });
+      }
+      game.boneCount = totalBones;
+      bonesLeftBadge.textContent = 'Bones: ' + totalBones;
+    }
+
+    // Initialize level
+    const bonesLeftBadgeEl = bonesLeftBadge;
+    function init(){
+      // Fill stage
+      buildLevel();
+      // initial dog position
+      game.dog.x = 120;
+      game.dog.y = game.groundY - game.dog.h;
+      game.dog.vy = 0;
+      game.dog.onGround = true;
+      // Start loop
+      lastTime = performance.now();
+      requestAnimationFrame(loop);
+    }
+
+    // Simple parallax background (blue gradients)
+    function drawBackground(offset){
+      // sky gradient
+      const g = ctx.createLinearGradient(0,0,0,H);
+      g.addColorStop(0, '#0a6bdc');
+      g.addColorStop(0.6, '#0a4fb4');
+      g.addColorStop(1, '#093a85');
+      ctx.fillStyle = g;
+      ctx.fillRect(0,0,W,H);
+
+      // distant hills (soft shapes)
+      ctx.fillStyle = 'rgba(255,255,255,.08)';
+      ctx.beginPath();
+      ctx.arc(W*0.25 - offset*0.25, H*0.6, 180, 0, Math.PI*2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(W*0.75 - offset*0.25, H*0.62, 220, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // Draw bone as simple bone shape (white)
+    function drawBone(x, y){
+      ctx.fillStyle = '#fff';
+      // body
+      ctx.fillRect(x-6, y-4, 12, 8);
+      // ends
+      ctx.fillRect(x-14, y-4, 8, 8);
+      ctx.fillRect(x+6, y-4, 8, 8);
+      // small highlight
+      ctx.fillStyle = '#ffd';
+      ctx.fillRect(x-4, y-2, 4, 4);
+    }
+
+    // Draw dog sprite (uses inline image if ready)
+    function drawDog(x, y){
+      if(dogImgReady){
+        // draw the prepared SVG dog sprite as an image
+        ctx.drawImage(dogImage, x, y, game.dog.w, game.dog.h);
+      } else {
+        // fallback: fluffy circle-based dog
+        // body
+        ctx.fillStyle = '#f5a56b';
+        ctx.beginPath();
+        ctx.ellipse(x + game.dog.w*0.5, y + game.dog.h*0.58, game.dog.w*0.42, game.dog.h*0.55, 0, 0, Math.PI*2);
+        ctx.fill();
+        // head
+        ctx.fillStyle = '#ffd9bd';
+        ctx.beginPath();
+        ctx.arc(x + game.dog.w*0.32, y + game.dog.h*0.25, 12, 0, Math.PI*2);
+        ctx.fill();
+        // eye
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.arc(x + game.dog.w*0.31, y + game.dog.h*0.23, 2, 0, Math.PI*2);
+        ctx.fill();
+        // ears
+        ctx.fillStyle = '#f59e42';
+        ctx.beginPath();
+        ctx.moveTo(x + game.dog.w*0.14, y + game.dog.h*0.14);
+        ctx.lineTo(x + game.dog.w*0.28, y + game.dog.h*0.04);
+        ctx.lineTo(x + game.dog.w*0.22, y + game.dog.h*0.28);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(x + game.dog.w*0.46, y + game.dog.h*0.12);
+        ctx.lineTo(x + game.dog.w*0.62, y + game.dog.h*0.04);
+        ctx.lineTo(x + game.dog.w*0.58, y + game.dog.h*0.30);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    // Build the initial level
+    buildLevel();
+
+    // Physics and collision helpers
+    function aabbCollision(ax, ay, aw, ah, bx, by, bw, bh){
+      return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+    }
+
+    let lastTime = 0;
+    function loop(now){
+      if(!game.running) {
+        // show overlay
+        drawOverlay("Paused");
+        return;
+      }
+
+      const dt = Math.min(0.033, (now - lastTime) / 1000);
+      lastTime = now;
+
+      // Update
+      update(dt);
+      // Render
+      render();
+
+      // End conditions
+      if(game.timeLeft <= 0){
+        game.running = false;
+        drawOverlay("Time's up! Your score: " + game.score);
+        // subtle fail state
+        beep(120, 0.25);
+      } else {
+        requestAnimationFrame(loop);
+      }
+    }
+
+    function update(dt){
+      // Camera advances with a steady pace, simulating forward movement
+      const speed = 120 * dt; // world scroll speed (px per second)
+      game.cameraX += speed * (dt * 0.8);
+
+      // Dog physics
+      game.dog.vy += game.gravity;
+      game.dog.y += game.dog.vy;
+
+      // Ground collision
+      const groundY = game.groundY;
+      if(game.dog.y + game.dog.h >= groundY){
+        game.dog.y = groundY - game.dog.h;
+        game.dog.vy = 0;
+        game.dog.onGround = true;
+        game.dog.jumpBoost = 0;
+      } else {
+        game.dog.onGround = false;
+      }
+
+      // Platform collisions
+      for(let p of game.platforms){
+        // Only check when dog is falling and near platform
+        if(game.dog.vy >= 0){
+          const dogLeft = game.dog.x;
+          const dogRight = game.dog.x + game.dog.w;
+          const dogTop = game.dog.y;
+          const dogBottom = game.dog.y + game.dog.h;
+          const collided = aabbCollision(dogLeft, dogTop, game.dog.w, game.dog.h, p.x, p.y, p.w, p.h);
+          if(collided && dogBottom > p.y && dogBottom - game.dog.vy <= p.y){
+            // land on platform
+            game.dog.y = p.y - game.dog.h;
+            game.dog.vy = 0;
+            game.dog.onGround = true;
+            break;
+          }
+        }
+      }
+
+      // Bones: collect when overlapping
+      for(let bone of game.bones){
+        if(bone.collected) continue;
+        const dx = (bone.x - game.cameraX) - (game.dog.x - 40);
+        const dy = (bone.y) - (game.dog.y + game.dog.h*0.5);
+        const dist = Math.hypot(dx, dy);
+        if(dist < 22){
+          bone.collected = true;
+          game.score += 10;
+          beep(800, 0.08);
+          scoreBadge.textContent = 'Score: ' + game.score;
+          bonesLeftBadge.textContent = 'Bones: ' + (game.boneCount - game.bones.filter(b => b.collected).length);
+        }
+      }
+
+      // Time progression
+      // We decrement time every second
+      // Use a simple accumulator by dt
+      timeAccumulator += dt;
+      if(timeAccumulator >= 1){
+        timeAccumulator -= 1;
+        game.timeLeft--;
+        document.querySelector('#bonesLeft').textContent = 'Bones: ' + (game.boneCount - game.bones.filter(b => b.collected).length);
+      }
+
+      // Win detection: all bones collected
+      const remaining = game.bones.filter(b => !b.collected).length;
+      if(remaining === 0){
+        game.running = false;
+        game.won = true;
+        drawOverlay("You collected all bones! Final score: " + game.score);
+        beep(1200, 0.25);
+      }
+
+      // Keep dog within a reasonable vertical range
+      if(game.dog.y < -10) { game.dog.y = -10; game.dog.vy = 0; }
+
+      // Subtle damping for smoother play near ground
+      if(game.dog.onGround && game.dog.vy === 0){
+        game.dog.vy = 0;
+      }
+    }
+
+    let timeAccumulator = 0;
+
+    function render(){
+      // Clear
+      ctx.clearRect(0,0,W,H);
+
+      // Background
+      drawBackground(game.cameraX * 0.6);
+
+      // Ground and platforms
+      ctx.fillStyle = '#6b6b6b';
+      for(let p of game.platforms){
+        const x = p.x - game.cameraX;
+        const y = p.y;
+        ctx.fillRect(x, y, p.w, p.h);
+        // subtle platform edge highlight
+        ctx.fillStyle = 'rgba(255,255,255,.15)';
+        ctx.fillRect(x, y, p.w, 4);
+        ctx.fillStyle = '#6b6b6b';
+      }
+
+      // Bones
+      for(let bone of game.bones){
+        if(bone.collected) continue;
+        const x = bone.x - game.cameraX;
+        const y = bone.y;
+        drawBone(x, y);
+      }
+
+      // Dog
+      const dogX = game.dog.x;
+      const dogY = game.dog.y;
+      drawDog(dogX, dogY);
+
+      // Foreground highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.04)';
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    function drawOverlay(text){
+      // Simple overlay centered text
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,.45)';
+      ctx.fillRect(0,0,W,H);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 28px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(text, W/2, H/2);
+      ctx.restore();
+    }
+
+    // Init time
+    let overlayShown = false;
+    function startOverlayIfNeeded(){
+      if(!overlayShown) {
+        overlayShown = true;
+        drawOverlay("Jump to start! Tap/Press Space or Up Arrow to leap.");
+      }
+    }
+
+    // Kick off
+    const timeStart = Date.now();
+    init();
+
+    // Accessibility: announce score/time changes via ARIA live region
+    // (We keep it simple here; the HUD already updates visually.)
+
+  })();
+  </script>
+</body>
+</html>

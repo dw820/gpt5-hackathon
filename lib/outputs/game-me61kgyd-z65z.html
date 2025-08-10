@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Snap-Swap Puzzle</title>
+<style>
+  :root { --gap: 6px; --tileRadius: 10px; --accent: #28a7f7; }
+  body {
+    margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    background: radial-gradient(1200px 800px at 10% 10%, #0e1014, #111622 60%, #0b0f1a);
+    color: #e8eef7; display: grid; min-height: 100vh; place-items: center;
+  }
+  main { width: min(92vw, 780px); padding: 16px 18px 22px; background: #141a26;
+    border: 1px solid rgba(255,255,255,.08); border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,.35);
+  }
+  header { display: grid; gap: 4px; margin-bottom: 10px; }
+  h1 { font-size: 1.4rem; margin: 0; letter-spacing: .3px; }
+  p#instructions { margin: 0; opacity: .85; font-size: .95rem; }
+  .topbar {
+    display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; margin: 10px 0 12px;
+  }
+  .score {
+    display: flex; gap: 14px; flex-wrap: wrap; align-items: center; font-variant-numeric: tabular-nums;
+  }
+  .badge { background: #182134; padding: 6px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.06); }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; }
+  button {
+    background: linear-gradient(#1f2a40,#172236); color: #e8eef7; border: 1px solid rgba(255,255,255,.1);
+    padding: 8px 12px; border-radius: 10px; cursor: pointer; transition: transform .05s ease;
+  }
+  button:active { transform: translateY(1px) scale(.99); }
+  .uploader {
+    display: inline-flex; align-items: center; gap: 8px; background: #162036; border: 1px dashed rgba(255,255,255,.18);
+    padding: 7px 10px; border-radius: 10px;
+  }
+  .uploader input[type=file] { display: none; }
+  .uploader label { cursor: pointer; color: #cfe4ff; }
+
+  /* Board */
+  .board-wrap { position: relative; }
+  #board {
+    width: min(92vw, 560px); aspect-ratio: 1 / 1; display: grid;
+    grid-template-columns: repeat(3, 1fr); gap: var(--gap); background: #0d1320; border-radius: 12px;
+    padding: var(--gap); outline: none; user-select: none; touch-action: manipulation;
+    border: 1px solid rgba(255,255,255,.08);
+  }
+  .tile {
+    position: relative; border-radius: var(--tileRadius); background-color: #203352;
+    background-repeat: no-repeat; background-origin: border-box;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.07), 0 3px 10px rgba(0,0,0,.25);
+    overflow: hidden; cursor: pointer;
+  }
+  .tile::after { /* subtle glossy overlay */
+    content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(255,255,255,.07), transparent 40%);
+    mix-blend-mode: screen; pointer-events: none;
+  }
+  .tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .tile[aria-pressed="true"] {
+    box-shadow: inset 0 0 0 2px var(--accent), 0 6px 16px rgba(40,167,247,.3);
+    transform: translateY(-1px);
+  }
+  .drop-hint {
+    position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none;
+    color: #cfe4ff; font-weight: 600; opacity: 0; transition: opacity .2s ease;
+    text-align: center; padding: 10px;
+  }
+  .board-wrap.dragover .drop-hint { opacity: .95; }
+  .win {
+    animation: pop .45s ease both;
+  }
+  @keyframes pop {
+    from { transform: scale(.98); } 50% { transform: scale(1.02);} to { transform: scale(1); }
+  }
+  footer { margin-top: 12px; font-size: .9rem; opacity: .8; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .hint { background: #162036; border: 1px solid rgba(255,255,255,.1); padding: 6px 8px; border-radius: 8px; }
+  .visually-hidden { position: absolute !important; width: 1px; height: 1px; margin: -1px; border: 0; padding: 0;
+                     white-space: nowrap; clip-path: inset(100%); clip: rect(0 0 0 0); overflow: hidden; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 aria-label="Snap-Swap Puzzle game">Snap‑Swap Puzzle</h1>
+    <p id="instructions">
+      Swap tiles to rebuild the picture. Click or tap two tiles to swap them.
+      Keyboard: arrow keys to move focus, Enter/Space to select and swap.
+      Optional: drop or upload your own image.
+    </p>
+  </header>
+
+  <div class="topbar" role="region" aria-label="Score and controls">
+    <div class="score">
+      <div class="badge" aria-live="polite" aria-atomic="true">Moves: <strong id="moves">0</strong></div>
+      <div class="badge" aria-live="polite" aria-atomic="true">Time: <strong id="time">0</strong>s</div>
+      <div class="badge">Grid: <strong id="gridLabel">3×3</strong></div>
+    </div>
+    <div class="controls">
+      <button id="restart" type="button" aria-label="Restart and shuffle">Restart</button>
+      <span class="uploader" aria-label="Upload image">
+        <span aria-hidden="true">🖼️</span>
+        <label for="file">Use your image</label>
+        <input id="file" type="file" accept="image/*" aria-label="Choose an image file"/>
+      </span>
+    </div>
+  </div>
+
+  <div class="board-wrap" id="boardWrap">
+    <div id="board" role="grid" aria-label="Puzzle board" tabindex="0"></div>
+    <div class="drop-hint" aria-hidden="true">Drop an image here to puzzle it!</div>
+  </div>
+
+  <div id="status" class="visually-hidden" role="status" aria-live="polite"></div>
+  <img id="sourceImg" alt="Puzzle image source" class="visually-hidden" />
+
+  <footer>
+    <div class="hint">Tip: Finish in as few moves as possible!</div>
+    <button id="toggleSize" type="button" aria-label="Toggle grid between 3 by 3 and 4 by 4">Toggle 3×3 / 4×4</button>
+  </footer>
+</main>
+
+<script>
+(() => {
+  // If the user didn't provide an image, we use a colorful SVG placeholder.
+  const svgPlaceholder =
+    `<svg xmlns='http://www.w3.org/2000/svg' width='800' height='800' viewBox='0 0 800 800'>
+      <defs>
+        <linearGradient id='g1' x1='0' y1='0' x2='1' y2='1'>
+          <stop offset='0' stop-color='#2EE6A0'/><stop offset='1' stop-color='#1E88FF'/>
+        </linearGradient>
+        <linearGradient id='g2' x1='1' y1='0' x2='0' y2='1'>
+          <stop offset='0' stop-color='#FF7B72'/><stop offset='1' stop-color='#FFC857'/>
+        </linearGradient>
+        <radialGradient id='g3' cx='50%' cy='50%' r='70%'>
+          <stop offset='0' stop-color='#ffffff' stop-opacity='.15'/><stop offset='1' stop-color='#000000' stop-opacity='.0'/>
+        </radialGradient>
+        <pattern id='dots' width='24' height='24' patternUnits='userSpaceOnUse'>
+          <circle cx='4' cy='4' r='2' fill='rgba(255,255,255,.35)'/>
+        </pattern>
+      </defs>
+      <rect width='100%' height='100%' fill='#121b2b'/>
+      <rect x='0' y='0' width='800' height='800' fill='url(#dots)' opacity='.3'/>
+      <g>
+        <circle cx='620' cy='180' r='150' fill='url(#g1)'/>
+        <circle cx='220' cy='620' r='180' fill='url(#g2)'/>
+        <rect x='80' y='80' width='240' height='240' rx='40' fill='#7cf2e5' opacity='.6'/>
+        <rect x='480' y='480' width='240' height='240' rx='40' fill='#9ab6ff' opacity='.6'/>
+        <polygon points='400,120 520,360 280,360' fill='#ffe08a' opacity='.8'/>
+      </g>
+      <rect x='0' y='0' width='800' height='800' fill='url(#g3)'/>
+      <text x='50%' y='96%' text-anchor='middle' font-size='28' fill='rgba(255,255,255,.7)'
+            font-family='system-ui,Segoe UI,Arial'>Snap‑Swap Placeholder</text>
+    </svg>`;
+  const placeholderURL = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svgPlaceholder);
+
+  const board = document.getElementById('board');
+  const boardWrap = document.getElementById('boardWrap');
+  const movesEl = document.getElementById('moves');
+  const timeEl = document.getElementById('time');
+  const restartBtn = document.getElementById('restart');
+  const toggleBtn = document.getElementById('toggleSize');
+  const fileInput = document.getElementById('file');
+  const status = document.getElementById('status');
+  const srcImg = document.getElementById('sourceImg');
+  const gridLabel = document.getElementById('gridLabel');
+
+  let GRID = 3;                 // grid size (3 or 4)
+  let order = [];               // order[pos] = correctIndex currently at position pos
+  let selectedPos = null;       // selected tile position
+  let imgURL = placeholderURL;  // current image URL
+  let moves = 0;
+  let timer = 0, tick = null;
+  let gameOver = false;
+
+  function setStatus(msg) { status.textContent = msg; }
+
+  function backgroundSizeFor(grid) {
+    return `${grid * 100}% ${grid * 100}%`;
+  }
+  function backgroundPosFor(correctIndex, grid) {
+    const x = correctIndex % grid, y = Math.floor(correctIndex / grid);
+    // positions: 0%, 100/(grid-1)%, ..., 100% (works with background-size grid*100%)
+    const step = grid === 1 ? 0 : 100 / (grid - 1);
+    return `${x * step}% ${y * step}%`;
+  }
+
+  function createTiles() {
+    board.innerHTML = '';
+    board.style.gridTemplateColumns = `repeat(${GRID}, 1fr)`;
+    for (let pos = 0; pos < GRID * GRID; pos++) {
+      const tile = document.createElement('button');
+      tile.type = 'button';
+      tile.className = 'tile';
+      tile.setAttribute('role', 'gridcell');
+      tile.setAttribute('aria-pressed', 'false');
+      tile.dataset.pos = String(pos);
+      tile.addEventListener('click', onTileClick);
+      tile.addEventListener('keydown', onTileKeydown);
+      board.appendChild(tile);
+    }
+  }
+
+  function applyOrderToTiles() {
+    const tiles = [...board.children];
+    tiles.forEach((tile, pos) => {
+      const correctIndex = order[pos];
+      tile.style.backgroundImage = `url("${imgURL}")`;
+      tile.style.backgroundSize = backgroundSizeFor(GRID);
+      tile.style.backgroundPosition = backgroundPosFor(correctIndex, GRID);
+      tile.setAttribute('aria-label', `Tile at row ${Math.floor(pos/GRID)+1}, column ${pos%GRID+1}${selectedPos===pos ? ', selected' : ''}`);
+    });
+  }
+
+  function shuffleOrder() {
+    const n = GRID * GRID;
+    order = Array.from({length: n}, (_, i) => i);
+    // Fisher-Yates
+    for (let i = n - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    // Ensure not already solved
+    if (order.every((v, i) => v === i)) {
+      const j = (n > 1) ? 1 : 0;
+      [order[0], order[j]] = [order[j], order[0]];
+    }
+  }
+
+  function startTimer() {
+    stopTimer();
+    timer = 0; timeEl.textContent = '0';
+    tick = setInterval(() => { timer++; timeEl.textContent = String(timer); }, 1000);
+  }
+  function stopTimer() { if (tick) { clearInterval(tick); tick = null; } }
+
+  function resetGame(keepImage = true) {
+    gameOver = false;
+    moves = 0; movesEl.textContent = '0';
+    selectedPos = null;
+    gridLabel.textContent = `${GRID}×${GRID}`;
+    if (!keepImage) imgURL = placeholderURL;
+    createTiles();
+    shuffleOrder();
+    applyOrderToTiles();
+    startTimer();
+    setStatus('New puzzle started.');
+    board.classList.remove('win');
+    board.focus({preventScroll: true});
+  }
+
+  function selectPos(pos) {
+    // Toggle selection
+    const tiles = [...board.children];
+    if (selectedPos === pos) {
+      selectedPos = null;
+      tiles[pos].setAttribute('aria-pressed', 'false');
+    } else {
+      if (selectedPos !== null) tiles[selectedPos].setAttribute('aria-pressed', 'false');
+      selectedPos = pos;
+      tiles[pos].setAttribute('aria-pressed', 'true');
+    }
+    applyOrderToTiles();
+  }
+
+  function swapPositions(a, b) {
+    if (a === b) return;
+    [order[a], order[b]] = [order[b], order[a]];
+    moves++; movesEl.textContent = String(moves);
+    setStatus(`Swapped tiles at ${a+1} and ${b+1}.`);
+    applyOrderToTiles();
+    checkSolved();
+  }
+
+  function checkSolved() {
+    if (order.every((v,i)=>v===i)) {
+      gameOver = true;
+      stopTimer();
+      setStatus(`Solved in ${moves} moves and ${timer} seconds. Great job!`);
+      board.classList.add('win');
+      // Brief focus ring removal
+      const tiles = [...board.children];
+      tiles.forEach(t=>t.setAttribute('aria-pressed','false'));
+      selectedPos = null;
+    }
+  }
+
+  function onTileClick(e) {
+    if (gameOver) return;
+    const pos = Number(e.currentTarget.dataset.pos);
+    if (selectedPos === null) {
+      selectPos(pos);
+    } else if (selectedPos === pos) {
+      selectPos(pos); // unselect
+    } else {
+      const a = selectedPos, b = pos;
+      selectedPos = null;
+      swapPositions(a, b);
+    }
+  }
+
+  function onTileKeydown(e) {
+    const key = e.key;
+    const pos = Number(e.currentTarget.dataset.pos);
+    if (['Enter',' '].includes(key)) {
+      e.preventDefault();
+      onTileClick({ currentTarget: e.currentTarget });
+      return;
+    }
+    const row = Math.floor(pos / GRID), col = pos % GRID;
+    let target = null;
+    if (key === 'ArrowLeft' && col > 0) target = pos - 1;
+    if (key === 'ArrowRight' && col < GRID - 1) target = pos + 1;
+    if (key === 'ArrowUp' && row > 0) target = pos - GRID;
+    if (key === 'ArrowDown' && row < GRID - 1) target = pos + GRID;
+    if (target !== null) {
+      e.preventDefault();
+      const tiles = [...board.children];
+      tiles[target].focus();
+    }
+  }
+
+  // Drag & drop to use user's image
+  function useImageFromFile(file) {
+    if (!file || !file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      imgURL = reader.result;
+      srcImg.src = imgURL;
+      srcImg.alt = file.name ? `Puzzle image: ${file.name}` : 'Puzzle image';
+      resetGame(true);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  boardWrap.addEventListener('dragenter', (e) => { e.preventDefault(); boardWrap.classList.add('dragover'); });
+  boardWrap.addEventListener('dragover', (e) => { e.preventDefault(); });
+  boardWrap.addEventListener('dragleave', (e) => { if (e.target === boardWrap) boardWrap.classList.remove('dragover'); });
+  boardWrap.addEventListener('drop', (e) => {
+    e.preventDefault(); boardWrap.classList.remove('dragover');
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    useImageFromFile(file);
+  });
+  fileInput.addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    useImageFromFile(file);
+  });
+
+  restartBtn.addEventListener('click', () => resetGame(true));
+  toggleBtn.addEventListener('click', () => {
+    GRID = GRID === 3 ? 4 : 3;
+    resetGame(true);
+  });
+
+  // Initialize with placeholder image
+  srcImg.src = imgURL;
+  srcImg.alt = 'Colorful abstract placeholder art';
+  resetGame(true);
+})();
+</script>
+</body>
+</html>

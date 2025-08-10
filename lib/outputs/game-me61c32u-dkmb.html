@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dog Image Catch — Quick Tiny Game</title>
+  <style>
+    :root{
+      --bg: #0b1020;
+      --card: #1e2340;
+      --text: #e9e9f2;
+      --accent: #ffd166;
+      --muted: #b9b9d6;
+    }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: radial-gradient(circle at 20% -10%, #2a2f6f 0%, #0b1020 40%), #0b1020;
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* Layout */
+    .wrap {
+      max-width: 1020px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 6px 10px 12px;
+    }
+
+    h1 {
+      font-size: 1.25rem;
+      margin: 0;
+      letter-spacing: .2px;
+    }
+
+    .hint {
+      font-size: .88rem;
+      color: var(--muted);
+    }
+
+    .stage {
+      position: relative;
+      width: 100%;
+      height: min(62vh, 520px);
+      border-radius: 14px;
+      overflow: hidden;
+      border: 2px solid rgba(255,255,255,.15);
+      background: #111;
+      box-shadow: 0 12px 30px rgba(0,0,0,.25);
+      isolation: isolate;
+    }
+
+    /* Main image area: inline SVG placeholder that represents the provided image */
+    .dog-image {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* Treats (targets) */
+    .treat {
+      position: absolute;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      padding: 0;
+      outline: none;
+      user-select: none;
+      touch-action: manipulation;
+      /* nice glowing gradient */
+      background: radial-gradient(circle at 35% 35%, #fff 0 15%, #ffd6a5 15% 40%, #ff7f50 40% 70%, #e65c00 70% 100%);
+      box-shadow: 0 1px 6px rgba(0,0,0,.3), 0 0 0 4px rgba(255,255,255,.15);
+      transition: transform .08s ease;
+    }
+    .treat:active { transform: scale(0.92); }
+
+    /* HUD (score & timer) */
+    .hud {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+      margin: 12px 0 6px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(30,35,70,.9);
+      border: 1px solid rgba(255,255,255,.15);
+      font-size: 14px;
+      color: #fff;
+    }
+    .badge strong { font-weight: 700; }
+    .btn {
+      appearance: none;
+      border: none;
+      background: linear-gradient(#5a8cff, #3b6aff);
+      color: white;
+      padding: 9px 14px;
+      border-radius: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform .08s ease;
+      box-shadow: 0 2px 8px rgba(0,0,0,.25);
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .msg {
+      font-size: 1rem;
+      color: #e9e9f2;
+      margin-left: auto;
+      padding: 6px 10px;
+      border-radius: 8px;
+      background: rgba(0,0,0,.25);
+    }
+
+    @media (max-width: 700px) {
+      h1 { font-size: 1.05rem; }
+      .badge { font-size: 13px; padding: 7px 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap" aria-label="Game container">
+    <header>
+      <div>
+        <h1>Dog Photo Dash (Minimal Challenge)</h1>
+        <div class="hint" aria-live="polite">Click the glowing treats on the image as fast as you can. You have 60 seconds. Have fun!</div>
+      </div>
+      <div class="msg" id="endMessage" style="display:none;" aria-live="polite">Time's up! Press Restart to play again.</div>
+    </header>
+
+    <section class="stage" id="stage" aria-label="Play area with dog image background" role="region">
+      <!-- Main image usage: inline SVG acts as the provided image for the game.
+           If you replace the SVG contents with your own image, this element stays the same. -->
+      <svg class="dog-image" viewBox="0 0 800 450" role="img" aria-label="Decorative dog image background placeholder">
+        <!-- Simple fluffy dog-like shape (stylistic placeholder) -->
+        <defs>
+          <radialGradient id="g1" cx="30%" cy="30%" r="70%">
+            <stop offset="0%" stop-color="#fff8" />
+            <stop offset="60%" stop-color="#ffd6a5" />
+            <stop offset="100%" stop-color="#fcb57a" />
+          </radialGradient>
+        </defs>
+        <!-- bg -->
+        <rect width="800" height="450" fill="#2a6bdc" />
+        <!-- fluffy body (stylized) -->
+        <ellipse cx="320" cy="260" rx="190" ry="120" fill="url(#g1)" />
+        <ellipse cx="420" cy="210" rx="150" ry="110" fill="#f5c79e" opacity="0.9" />
+        <!-- head hint -->
+        <ellipse cx="240" cy="170" rx="110" ry="90" fill="#f8d7a9" />
+        <!-- face hints -->
+        <circle cx="210" cy="160" r="10" fill="#2a2a2a" />
+        <circle cx="265" cy="160" r="10" fill="#2a2a2a" />
+        <path d="M230,190 q20,20 60,0" fill="none" stroke="#7a4b2e" stroke-width="6" stroke-linecap="round"/>
+      </svg>
+      <!-- Treats will be added programmatically on top of this image -->
+    </section>
+
+    <div class="hud" aria-label="Game status">
+      <span class="badge" aria-live="polite">Score: <strong id="score">0</strong></span>
+      <span class="badge" aria-live="polite">Time: <strong id="time">60</strong>s</span>
+      <button class="btn" id="restart" aria-label="Restart game">Restart</button>
+    </div>
+  </div>
+
+  <script>
+    // Game logic: very small, self-contained.
+    // Image→game mapping: The provided image is used as the main stage background
+    // (here implemented as an inline SVG illustration). Treats are spawned on top.
+
+    const stage = document.getElementById('stage');
+    const scoreEl = document.getElementById('score');
+    const timeEl = document.getElementById('time');
+    const restartBtn = document.getElementById('restart');
+    const endMessage = document.getElementById('endMessage');
+
+    let score = 0;
+    let timeLeft = 60; // seconds
+    let timerId = null;
+    let spawnInterval = null;
+
+    // Initialize: spawn a handful of treats to start
+    const INITIAL_TREATS = 6;
+
+    function rand(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    function spawnTreat() {
+      // Create a simple round button-like element (treat)
+      const t = document.createElement('button');
+      t.className = 'treat';
+      t.setAttribute('aria-label', 'Collectible treat');
+      // Random color variance for nicer visuals
+      const hue = Math.floor(rand(20, 40));
+      t.style.background = `radial-gradient(circle at 35% 35%, #fff 0 15%, hsl(${hue} 90% 60%) 15% 40%, hsl(${hue+20} 90% 60%) 40% 70%, #cc6 70% 100%)`;
+
+      // Place within stage bounds
+      const stageRect = stage.getBoundingClientRect();
+      const w = 28, h = 28;
+      const pad = 6;
+      const maxX = Math.max(0, stage.clientWidth - w - pad);
+      const maxY = Math.max(0, stage.clientHeight - h - pad);
+
+      const x = rand(pad, maxX);
+      const y = rand(pad, maxY);
+      t.style.left = x + 'px';
+      t.style.top  = y + 'px';
+      t.style.position = 'absolute';
+      t.style.width = w + 'px';
+      t.style.height = h + 'px';
+      t.style.borderRadius = '50%';
+      t.style.border = 'none';
+      t.style.cursor = 'pointer';
+      t.style.outline = 'none';
+      t.style.padding = '0';
+      t.style.boxShadow = '0 2px 6px rgba(0,0,0,.25), 0 0 0 3px rgba(255,255,255,.15)';
+
+      // Interaction
+      t.addEventListener('click', onTreatClick);
+
+      stage.appendChild(t);
+    }
+
+    function onTreatClick(e) {
+      const el = e.currentTarget;
+      // prevent multiple clicks
+      el.removeEventListener('click', onTreatClick);
+      el.style.pointerEvents = 'none';
+      // simple "eat" animation
+      el.style.transition = 'transform .15s ease, opacity .3s ease';
+      el.style.transform = 'scale(0.2)';
+      el.style.opacity = '0';
+      // bump score
+      score++;
+      scoreEl.textContent = score;
+      // remove after a short delay to allow animation
+      setTimeout(() => {
+        if (el.parentNode === stage) stage.removeChild(el);
+      }, 250);
+      // spawn a new treat to keep the flow
+      spawnTreat();
+    }
+
+    function startGame() {
+      // reset
+      score = 0;
+      timeLeft = 60;
+      scoreEl.textContent = score;
+      timeEl.textContent = timeLeft;
+      endMessage.style.display = 'none';
+      // clear any leftovers
+      Array.from(stage.querySelectorAll('.treat')).forEach(n => {
+        n.removeEventListener('click', onTreatClick);
+        n.remove();
+      });
+
+      // spawn initial treats
+      for (let i = 0; i < INITIAL_TREATS; i++) spawnTreat();
+
+      // timer
+      const tick = () => {
+        timeLeft -= 0.1;
+        timeEl.textContent = Math.max(0, timeLeft).toFixed(1);
+        if (timeLeft <= 0) {
+          endGame();
+        }
+      };
+      if (timerId) clearInterval(timerId);
+      timerId = setInterval(tick, 100);
+      // optional: keep spawning occasionally if needed (not strictly required)
+      // spawnInterval = setInterval(() => spawnTreat(), 900);
+    }
+
+    function endGame() {
+      if (timerId) clearInterval(timerId);
+      // if we had a spawnInterval, clear as well
+      if (spawnInterval) clearInterval(spawnInterval);
+      // disable lingering treats
+      stage.querySelectorAll('.treat').forEach(n => {
+        n.style.pointerEvents = 'none';
+      });
+      endMessage.style.display = 'block';
+    }
+
+    function resetGame() {
+      // reset and restart
+      endMessage.style.display = 'none';
+      startGame();
+    }
+
+    // UX: allow Restart button
+    restartBtn.addEventListener('click', resetGame);
+    // Keyboard support: press R to restart
+    window.addEventListener('keydown', (e) => {
+      if (e.key.toLowerCase() === 'r') resetGame();
+    });
+
+    // Start on load for instant play
+    window.addEventListener('load', startGame);
+  </script>
+</body>
+</html>

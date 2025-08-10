@@ -17,9 +17,9 @@ async function readHtmlForSlug(slug: string): Promise<string | null> {
 export default async function GeneratedPage({
   params,
 }: {
-  params: Promise<{ slug: string }>;
+  params: { slug: string };
 }) {
-  const { slug } = await params;
+  const { slug } = params;
   const html = await readHtmlForSlug(slug);
   if (!html) {
     return (
@@ -29,10 +29,17 @@ export default async function GeneratedPage({
       </div>
     );
   }
+
+  // Render inside an iframe so inline <script> tags execute
   return (
-    <html>
-      <head />
-      <body dangerouslySetInnerHTML={{ __html: html }} />
-    </html>
+    <div className="w-screen min-h-screen">
+      <iframe
+        title={`generated-${slug}`}
+        className="w-screen h-[100vh] border-0"
+        srcDoc={html}
+        // Allow scripts and input interactions inside the iframe
+        sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock"
+      />
+    </div>
   );
 }

@@ -17,7 +17,8 @@ export async function getResponseOutputText(
   const startedAt = Date.now();
   console.log("[lib/make-web] openai call start");
   const response = await openai.responses.create({
-    model: "gpt-5-nano",
+    // model: "gpt-5-nano",
+    model: "gpt-5",
     input,
   });
   const durationMs = Date.now() - startedAt;
