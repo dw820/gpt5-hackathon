@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Image Shooter — Click/Tap the Targets!</title>
+<style>
+  /* Basic layout */
+  :root{
+    --bg1:#0f1724;
+    --bg2:#0b2545;
+    --accent:#ffce43;
+    --muted:#b8c6d9;
+  }
+  html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;}
+  body{
+    display:flex;flex-direction:column;gap:12px;
+    background:linear-gradient(180deg,var(--bg1),var(--bg2));
+    color:white;padding:18px;
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+  }
+
+  header{display:flex;flex-direction:column;gap:6px;}
+  h1{margin:0;font-size:1.35rem;letter-spacing:0.6px;}
+  p.instructions{margin:0;color:var(--muted);font-size:0.95rem;}
+
+  /* Game area */
+  main#game{position:relative;flex:1;min-height:48vh;border-radius:12px;overflow:hidden;
+    background:
+      radial-gradient(1000px 400px at 10% 10%,rgba(255,206,67,0.06),transparent 10%),
+      linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.00));
+    box-shadow:0 6px 24px rgba(2,6,23,0.6) inset;
+    border:1px solid rgba(255,255,255,0.03);
+    touch-action:none;
+  }
+
+  /* Targets use the provided image as background */
+  .target{
+    position:absolute;will-change:transform,opacity;
+    background-image: url("{{IMAGE_URL}}");
+    background-size:cover;background-position:center;
+    border-radius:14px;border:2px solid rgba(255,255,255,0.06);
+    box-shadow:0 8px 18px rgba(2,8,20,0.6);
+    transform-origin:center center;
+    cursor:crosshair;
+    user-select:none; -webkit-user-select:none;
+  }
+
+  /* When hit: quick pop + fade */
+  .hit{
+    transition: transform 240ms cubic-bezier(.2,.9,.3,1), opacity 240ms;
+    transform:scale(1.45) rotate(12deg);
+    opacity:0;
+    pointer-events:none;
+  }
+
+  /* Small muzzle flash for non-hit shots */
+  .flash{
+    position:absolute;pointer-events:none;width:14px;height:14px;border-radius:50%;
+    background:radial-gradient(circle at 35% 35%, #fff 0 10%, rgba(255,206,67,0.9) 10% 45%, rgba(255,206,67,0.15) 45%);
+    transform:translate(-50%,-50%) scale(0.8);opacity:0.95;
+    mix-blend-mode:screen;filter:blur(0.5px);
+  }
+
+  /* HUD */
+  footer{display:flex;align-items:center;gap:12px;justify-content:space-between;margin-top:6px;}
+  .hud{display:flex;gap:12px;align-items:center;}
+  .stat{background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent);padding:8px 12px;border-radius:8px;font-weight:600;color:var(--muted);min-width:86px;text-align:center;}
+  .big{font-size:1.05rem;color:var(--accent);font-weight:800;}
+  button{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);padding:8px 12px;border-radius:8px;cursor:pointer}
+  button:hover{color:white;border-color:rgba(255,255,255,0.12);box-shadow:0 6px 18px rgba(0,0,0,0.4) inset}
+  .message{font-size:0.95rem;color:var(--muted)}
+  /* Responsive */
+  @media (max-width:520px){
+    h1{font-size:1.1rem}
+    .stat{min-width:70px;padding:7px 10px}
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Image Shooter</h1>
+    <p class="instructions">Tap/click the flying images to shoot them. Each hit scores +1. 30 seconds — try to get the highest score!</p>
+  </header>
+
+  <main id="game" aria-label="Game area">
+    <!-- targets and flashes created dynamically inside -->
+  </main>
+
+  <footer>
+    <div class="hud">
+      <div class="stat">Score<br><span id="score" class="big">0</span></div>
+      <div class="stat">Time<br><span id="time" class="big">30</span>s</div>
+      <div class="message" id="status">Ready</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button id="startBtn" aria-label="Start game">Start</button>
+      <button id="restartBtn" aria-label="Restart game">Restart</button>
+    </div>
+  </footer>
+
+<script>
+/*
+  Simple shooter:
+  - Targets are elements with the provided image as background.
+  - They float upward with random speed and wobble; pointerdown on a target is a hit.
+  - Pointerdown elsewhere produces a small flash for feedback.
+  - 30-second round, score tracked, restart supported.
+*/
+
+(() => {
+  const GAME_TIME = 30; // seconds
+  const SPAWN_MS = 650; // spawn interval
+  const MAX_TARGETS = 10;
+
+  const container = document.getElementById('game');
+  const scoreEl = document.getElementById('score');
+  const timeEl = document.getElementById('time');
+  const statusEl = document.getElementById('status');
+  const startBtn = document.getElementById('startBtn');
+  const restartBtn = document.getElementById('restartBtn');
+
+  let score = 0;
+  let timeLeft = GAME_TIME;
+  let running = false;
+  let spawnTimer = null;
+  let tickTimer = null;
+  let rafId = null;
+  let lastTs = 0;
+  const targets = new Set();
+
+  function setStatus(s){ statusEl.textContent = s; }
+
+  function startGame(){
+    stopGame();
+    score = 0;
+    timeLeft = GAME_TIME;
+    updateHUD();
+    setStatus('Go! Shoot them!');
+    running = true;
+    // spawn targets periodically
+    spawnTimer = setInterval(spawnTarget, SPAWN_MS);
+    // countdown
+    tickTimer = setInterval(()=>{
+      timeLeft--;
+      updateHUD();
+      if(timeLeft <= 0) endGame();
+    }, 1000);
+    // start animation loop
+    lastTs = performance.now();
+    rafId = requestAnimationFrame(loop);
+  }
+
+  function stopGame(){
+    running = false;
+    if(spawnTimer){ clearInterval(spawnTimer); spawnTimer = null; }
+    if(tickTimer){ clearInterval(tickTimer); tickTimer = null; }
+    if(rafId){ cancelAnimationFrame(rafId); rafId = null; }
+  }
+
+  function endGame(){
+    stopGame();
+    // remove remaining targets gracefully
+    for(const t of Array.from(targets)) removeTarget(t);
+    setStatus('Time! Final score: ' + score);
+  }
+
+  function updateHUD(){
+    scoreEl.textContent = score;
+    timeEl.textContent = timeLeft;
+  }
+
+  function spawnTarget(){
+    if(!running) return;
+    if(targets.size >= MAX_TARGETS) return;
+
+    const rect = container.getBoundingClientRect();
+    const size = 52 + Math.round(Math.random()*90); // 52..142 px
+    const el = document.createElement('div');
+    el.className = 'target';
+    el.style.width = size + 'px';
+    el.style.height = size + 'px';
+    // start below bottom with random x
+    const x = Math.random()*(rect.width - size);
+    let y = rect.height + (10 + Math.random()*80);
+    // velocity: upward (negative y)
+    const vy = -(40 + Math.random()*160); // px per sec
+    const vx = (Math.random()-0.5) * 40; // small horizontal drift
+    const rot = (Math.random()-0.5) * 30;
+
+    // store motion data
+    el._motion = {x,y,vx,vy,rot};
+    // initial transform
+    el.style.transform = `translate(${x}px, ${y}px) rotate(${rot}deg)`;
+    // add pointer handler
+    el.addEventListener('pointerdown', onHit);
+
+    // add to DOM and set
+    container.appendChild(el);
+    targets.add(el);
+  }
+
+  function onHit(e){
+    // stop pointer from triggering background shot
+    e.stopPropagation();
+    if(!running) return;
+    const el = e.currentTarget;
+    // protect double hits
+    if(el.classList.contains('hit')) return;
+    score += 1;
+    updateHUD();
+    el.classList.add('hit');
+    // remove after animation
+    setTimeout(()=> removeTarget(el), 280);
+  }
+
+  function removeTarget(el){
+    if(!el) return;
+    el.removeEventListener('pointerdown', onHit);
+    if(el.parentElement) el.parentElement.removeChild(el);
+    targets.delete(el);
+  }
+
+  function spawnFlash(x,y){
+    const f = document.createElement('div');
+    f.className = 'flash';
+    f.style.left = x + 'px';
+    f.style.top = y + 'px';
+    container.appendChild(f);
+    // animate and remove
+    f.animate([
+      { transform:'translate(-50%,-50%) scale(0.6)', opacity:1 },
+      { transform:'translate(-50%,-50%) scale(1.6)', opacity:0 }
+    ], { duration:260, easing:'cubic-bezier(.2,.9,.3,1)'});
+    setTimeout(()=> { if(f.parentElement) f.parentElement.removeChild(f); }, 300);
+  }
+
+  // main animation loop
+  function loop(ts){
+    const dt = Math.min(60, ts - lastTs) / 1000; // seconds, clamp
+    lastTs = ts;
+    const rect = container.getBoundingClientRect();
+
+    for(const el of Array.from(targets)){
+      const m = el._motion;
+      // move
+      m.x += m.vx * dt;
+      m.y += m.vy * dt;
+      // slight rotation wobble
+      m.rot += (Math.sin(ts/800 + (m.x+m.y)/200) * 30) * 0.01;
+      el.style.transform = `translate(${m.x}px, ${m.y}px) rotate(${m.rot}deg)`;
+
+      // if fully off top, remove (missed)
+      if(m.y + parseFloat(el.style.height) < -120){
+        removeTarget(el);
+      }
+      // keep inside horizontal bounds a bit
+      if(m.x < -150 || m.x > rect.width + 150){
+        // drifted far offside: remove
+        removeTarget(el);
+      }
+    }
+
+    // schedule next
+    if(running) rafId = requestAnimationFrame(loop);
+  }
+
+  // click/tap on background => flash effect
+  container.addEventListener('pointerdown', (e)=>{
+    // only create flash if not hitting a target (target handler stops propagation)
+    if(!running) return;
+    const rect = container.getBoundingClientRect();
+    spawnFlash(e.clientX - rect.left, e.clientY - rect.top);
+  });
+
+  // Buttons
+  startBtn.addEventListener('click', ()=>{
+    if(!running) startGame();
+  });
+  restartBtn.addEventListener('click', ()=>{
+    startGame();
+  });
+
+  // Initialize with a gentle idle spawn so the player sees targets before starting
+  (function idleDemo(){
+    // spawn a couple targets to show how it looks
+    for(let i=0;i<3;i++){
+      setTimeout(spawnTarget, 250 + i*220);
+    }
+    setStatus('Press Start to play — try to hit as many as you can!');
+  })();
+
+  // Cleanup on unload
+  window.addEventListener('pagehide', stopGame);
+})();
+</script>
+</body>
+</html>
